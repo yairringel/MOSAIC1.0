@@ -1,0 +1,14 @@
+A: Load Image & Parameters (User selects file and specifies size)
+B: Edge Detection (HED/DiBlasi with Gaussian blur)
+C: Interactive Guideline Drawing & Edge Erasing (PyQt interface)
+D: Place Tiles Along Guideline Chains
+E: Place Tiles Into Gaps (Filler chains)
+F: Cut Tiles at Image Frame (Remove parts outside frame)
+G: Make Tiles Convex (Convert concave to realistic polygons)
+H: Post-Process Tiles (Shrink, Repair, Simplify edges)
+I: Drop Very Small Tiles
+K: Assign Final Colors from Original Image (Average color method)
+L: Generate Final Mosaic Image/SVG (Output visualization)
+M: Optional Recoloring Based on Color Schemas (nilotic, fish, etc.)
+N: Optional Statistics Plot
+O: Save Final Polygons to CSV (With coordinates and RGB colors)

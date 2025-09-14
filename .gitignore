@@ -1,0 +1,445 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+#  Usually these files are written by a python script from a template
+#  before PyInstaller builds the exe, so as to inject date/other infos into it.
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
+#   However, in case of collaboration, if having platform-specific dependencies or dependencies
+#   having no cross-platform support, pipenv may install dependencies that don't work, or not
+#   install all needed dependencies.
+#Pipfile.lock
+
+# PEP 582; used by e.g. github.com/David-OConnor/pyflow
+__pypackages__/
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+debug_a1_bgr.png
+debug_a1_capture.png
+debug_a2_bgr.png
+debug_a2_capture.png
+debug_a3_bgr.png
+debug_a3_capture.png
+box tiles/A1/A1_#6e3530.dxf
+box tiles/A1/A1_#7aaf82.dxf
+box tiles/A1/A1_#7c5349.dxf
+box tiles/A1/A1_#82c38c.dxf
+box tiles/A1/A1_#44322d.dxf
+box tiles/A1/A1_#232324.dxf
+box tiles/A1/A1_#455746.dxf
+box tiles/A1/A1_#588766.dxf
+box tiles/A1/A1_#868471.dxf
+box tiles/A1/A1_#962221.dxf
+box tiles/A1/A1_#a7a18c.dxf
+box tiles/A1/A1_#a65f50.dxf
+box tiles/A1/A1_#a04439.dxf
+box tiles/A1/A1_#d35e51.dxf
+box tiles/A1/A1_#d18275.dxf
+box tiles/A1/box_A1.csv
+box tiles/A1/box_A1.dxf
+box tiles/A2/A2_#6e3530.dxf
+box tiles/A2/A2_#7aaf82.dxf
+box tiles/A2/A2_#7c5349.dxf
+box tiles/A2/A2_#82c38c.dxf
+box tiles/A2/A2_#16249a.dxf
+box tiles/A2/A2_#44322d.dxf
+box tiles/A2/A2_#232324.dxf
+box tiles/A2/A2_#455746.dxf
+box tiles/A2/A2_#588766.dxf
+box tiles/A2/A2_#868471.dxf
+box tiles/A2/A2_#962221.dxf
+box tiles/A2/A2_#a7a18c.dxf
+box tiles/A2/A2_#a65f50.dxf
+box tiles/A2/A2_#a04439.dxf
+box tiles/A2/A2_#d6b6a9.dxf
+box tiles/A2/A2_#d35e51.dxf
+box tiles/A2/A2_#d5949a.dxf
+box tiles/A2/A2_#d18275.dxf
+box tiles/A2/A2_#f1c924.dxf
+box tiles/A2/box_A2.csv
+box tiles/A2/box_A2.dxf
+box tiles/A3/A3_#6e3530.dxf
+box tiles/A3/A3_#7aaf82.dxf
+box tiles/A3/A3_#7c5349.dxf
+box tiles/A3/A3_#44322d.dxf
+box tiles/A3/A3_#232324.dxf
+box tiles/A3/A3_#455746.dxf
+box tiles/A3/A3_#588766.dxf
+box tiles/A3/A3_#868471.dxf
+box tiles/A3/A3_#962221.dxf
+box tiles/A3/A3_#a7a18c.dxf
+box tiles/A3/A3_#a65f50.dxf
+box tiles/A3/A3_#a04439.dxf
+box tiles/A3/A3_#d35e51.dxf
+box tiles/A3/A3_#d5949a.dxf
+box tiles/A3/box_A3.csv
+box tiles/A3/box_A3.dxf
+box tiles/A4/A4_#6e3530.dxf
+box tiles/A4/A4_#7aaf82.dxf
+box tiles/A4/A4_#7c5349.dxf
+box tiles/A4/A4_#44322d.dxf
+box tiles/A4/A4_#232324.dxf
+box tiles/A4/A4_#455746.dxf
+box tiles/A4/A4_#588766.dxf
+box tiles/A4/A4_#868471.dxf
+box tiles/A4/A4_#962221.dxf
+box tiles/A4/A4_#a7a18c.dxf
+box tiles/A4/A4_#a65f50.dxf
+box tiles/A4/A4_#a04439.dxf
+box tiles/A4/A4_#d35e51.dxf
+box tiles/A4/A4_#d18275.dxf
+box tiles/A4/box_A4.csv
+box tiles/A4/box_A4.dxf
+box tiles/B1/B1_#6e3530.dxf
+box tiles/B1/B1_#7aaf82.dxf
+box tiles/B1/B1_#7c5349.dxf
+box tiles/B1/B1_#0478a4.dxf
+box tiles/B1/B1_#44322d.dxf
+box tiles/B1/B1_#232324.dxf
+box tiles/B1/B1_#455746.dxf
+box tiles/B1/B1_#588766.dxf
+box tiles/B1/B1_#653979.dxf
+box tiles/B1/B1_#868471.dxf
+box tiles/B1/B1_#962221.dxf
+box tiles/B1/B1_#a7a18c.dxf
+box tiles/B1/B1_#a65f50.dxf
+box tiles/B1/B1_#a04439.dxf
+box tiles/B1/B1_#a21818.dxf
+box tiles/B1/B1_#d35e51.dxf
+box tiles/B1/B1_#d5949a.dxf
+box tiles/B1/B1_#d18275.dxf
+box tiles/B1/box_B1.csv
+box tiles/B1/box_B1.dxf
+box tiles/B2/B2_#2f563c.dxf
+box tiles/B2/B2_#6e3530.dxf
+box tiles/B2/B2_#7aaf82.dxf
+box tiles/B2/B2_#7c5349.dxf
+box tiles/B2/B2_#0478a4.dxf
+box tiles/B2/B2_#44322d.dxf
+box tiles/B2/B2_#232324.dxf
+box tiles/B2/B2_#962221.dxf
+box tiles/B2/B2_#a65f50.dxf
+box tiles/B2/B2_#a04439.dxf
+box tiles/B2/B2_#d6b6a9.dxf
+box tiles/B2/B2_#d35e51.dxf
+box tiles/B2/B2_#d5949a.dxf
+box tiles/B2/B2_#d9505b.dxf
+box tiles/B2/B2_#d18275.dxf
+box tiles/B2/B2_#ec4204.dxf
+box tiles/B2/box_B2.csv
+box tiles/B2/box_B2.dxf
+box tiles/B3/B3_#6e3530.dxf
+box tiles/B3/B3_#7c5349.dxf
+box tiles/B3/B3_#44322d.dxf
+box tiles/B3/B3_#232324.dxf
+box tiles/B3/B3_#455746.dxf
+box tiles/B3/B3_#868471.dxf
+box tiles/B3/B3_#962221.dxf
+box tiles/B3/B3_#a7a18c.dxf
+box tiles/B3/B3_#a65f50.dxf
+box tiles/B3/B3_#a04439.dxf
+box tiles/B3/B3_#d6b6a9.dxf
+box tiles/B3/B3_#d35e51.dxf
+box tiles/B3/B3_#d5949a.dxf
+box tiles/B3/B3_#d18275.dxf
+box tiles/B3/box_B3.csv
+box tiles/B3/box_B3.dxf
+box tiles/B4/B4_#6e3530.dxf
+box tiles/B4/B4_#7c5349.dxf
+box tiles/B4/B4_#44322d.dxf
+box tiles/B4/B4_#455746.dxf
+box tiles/B4/B4_#588766.dxf
+box tiles/B4/B4_#868471.dxf
+box tiles/B4/B4_#a7a18c.dxf
+box tiles/B4/B4_#a65f50.dxf
+box tiles/B4/B4_#a04439.dxf
+box tiles/B4/B4_#d6b6a9.dxf
+box tiles/B4/B4_#d35e51.dxf
+box tiles/B4/B4_#d5949a.dxf
+box tiles/B4/B4_#d18275.dxf
+box tiles/B4/box_B4.csv
+box tiles/B4/box_B4.dxf
+box tiles/C1/box_C1.csv
+box tiles/C1/box_C1.dxf
+box tiles/C1/C1_#6e3530.dxf
+box tiles/C1/C1_#7aaf82.dxf
+box tiles/C1/C1_#7c5349.dxf
+box tiles/C1/C1_#44322d.dxf
+box tiles/C1/C1_#232324.dxf
+box tiles/C1/C1_#455746.dxf
+box tiles/C1/C1_#588766.dxf
+box tiles/C1/C1_#868471.dxf
+box tiles/C1/C1_#962221.dxf
+box tiles/C1/C1_#a7a18c.dxf
+box tiles/C1/C1_#a04439.dxf
+box tiles/C1/C1_#d35e51.dxf
+box tiles/C2/box_C2.csv
+box tiles/C2/box_C2.dxf
+box tiles/C2/C2_#6e3530.dxf
+box tiles/C2/C2_#7c5349.dxf
+box tiles/C2/C2_#44322d.dxf
+box tiles/C2/C2_#232324.dxf
+box tiles/C2/C2_#455746.dxf
+box tiles/C2/C2_#588766.dxf
+box tiles/C2/C2_#962221.dxf
+box tiles/C2/C2_#a65f50.dxf
+box tiles/C2/C2_#a04439.dxf
+box tiles/C2/C2_#d6b6a9.dxf
+box tiles/C2/C2_#d35e51.dxf
+box tiles/C2/C2_#d5949a.dxf
+box tiles/C2/C2_#d18275.dxf
+box tiles/C3/box_C3.csv
+box tiles/C3/box_C3.dxf
+box tiles/C3/C3_#6e3530.dxf
+box tiles/C3/C3_#7c5349.dxf
+box tiles/C3/C3_#44322d.dxf
+box tiles/C3/C3_#232324.dxf
+box tiles/C3/C3_#455746.dxf
+box tiles/C3/C3_#588766.dxf
+box tiles/C3/C3_#868471.dxf
+box tiles/C3/C3_#962221.dxf
+box tiles/C3/C3_#a7a18c.dxf
+box tiles/C3/C3_#a65f50.dxf
+box tiles/C3/C3_#a04439.dxf
+box tiles/C3/C3_#d6b6a9.dxf
+box tiles/C3/C3_#d35e51.dxf
+box tiles/C3/C3_#d5949a.dxf
+box tiles/C3/C3_#d18275.dxf
+box tiles/C4/box_C4.csv
+box tiles/C4/box_C4.dxf
+box tiles/C4/C4_#6e3530.dxf
+box tiles/C4/C4_#7c5349.dxf
+box tiles/C4/C4_#44322d.dxf
+box tiles/C4/C4_#455746.dxf
+box tiles/C4/C4_#962221.dxf
+box tiles/C4/C4_#a7a18c.dxf
+box tiles/C4/C4_#a65f50.dxf
+box tiles/C4/C4_#a04439.dxf
+box tiles/C4/C4_#d6b6a9.dxf
+box tiles/C4/C4_#d35e51.dxf
+box tiles/C4/C4_#d5949a.dxf
+box tiles/C4/C4_#d18275.dxf
+box tiles/D1/box_D1.csv
+box tiles/D1/box_D1.dxf
+box tiles/D1/D1_#6e3530.dxf
+box tiles/D1/D1_#7c5349.dxf
+box tiles/D1/D1_#44322d.dxf
+box tiles/D1/D1_#232324.dxf
+box tiles/D1/D1_#455746.dxf
+box tiles/D1/D1_#588766.dxf
+box tiles/D1/D1_#868471.dxf
+box tiles/D1/D1_#962221.dxf
+box tiles/D1/D1_#a65f50.dxf
+box tiles/D1/D1_#a04439.dxf
+box tiles/D1/D1_#d35e51.dxf
+box tiles/D1/D1_#d18275.dxf
+box tiles/D2/box_D2.csv
+box tiles/D2/box_D2.dxf
+box tiles/D2/D2_#6e3530.dxf
+box tiles/D2/D2_#7c5349.dxf
+box tiles/D2/D2_#44322d.dxf
+box tiles/D2/D2_#232324.dxf
+box tiles/D2/D2_#868471.dxf
+box tiles/D2/D2_#962221.dxf
+box tiles/D2/D2_#a7a18c.dxf
+box tiles/D2/D2_#a65f50.dxf
+box tiles/D2/D2_#a04439.dxf
+box tiles/D2/D2_#d6b6a9.dxf
+box tiles/D2/D2_#d35e51.dxf
+box tiles/D2/D2_#d5949a.dxf
+box tiles/D2/D2_#d18275.dxf
+box tiles/D3/box_D3.csv
+box tiles/D3/box_D3.dxf
+box tiles/D3/D3_#6e3530.dxf
+box tiles/D3/D3_#7c5349.dxf
+box tiles/D3/D3_#44322d.dxf
+box tiles/D3/D3_#232324.dxf
+box tiles/D3/D3_#455746.dxf
+box tiles/D3/D3_#588766.dxf
+box tiles/D3/D3_#868471.dxf
+box tiles/D3/D3_#962221.dxf
+box tiles/D3/D3_#a7a18c.dxf
+box tiles/D3/D3_#a65f50.dxf
+box tiles/D3/D3_#a04439.dxf
+box tiles/D3/D3_#d6b6a9.dxf
+box tiles/D3/D3_#d35e51.dxf
+box tiles/D3/D3_#d5949a.dxf
+box tiles/D3/D3_#d18275.dxf
+box tiles/D4/box_D4.csv
+box tiles/D4/box_D4.dxf
+box tiles/D4/D4_#6e3530.dxf
+box tiles/D4/D4_#7c5349.dxf
+box tiles/D4/D4_#232324.dxf
+box tiles/D4/D4_#868471.dxf
+box tiles/D4/D4_#962221.dxf
+box tiles/D4/D4_#a7a18c.dxf
+box tiles/D4/D4_#a65f50.dxf
+box tiles/D4/D4_#a04439.dxf
+box tiles/D4/D4_#d6b6a9.dxf
+box tiles/D4/D4_#d5949a.dxf
+box tiles/D4/D4_#d18275.dxf
+PLATES/A1.dxf
+PLATES/A2.dxf
+PLATES/A3.dxf
+PLATES/A4.dxf
+PLATES/B1.dxf
+PLATES/B2.dxf
+PLATES/B3.dxf
+PLATES/B4.dxf
+PLATES/C1.dxf
+PLATES/C2.dxf
+PLATES/C3.dxf
+PLATES/C4.dxf
+PLATES/D1.dxf
+PLATES/D2.dxf
+PLATES/D3.dxf
+PLATES/D4.dxf
+PLATES/A1.dxf
+PLATES/A2.dxf
+PLATES/A3.dxf
+PLATES/A4.dxf
+PLATES/B1.dxf
+PLATES/B2.dxf
+PLATES/B3.dxf
+PLATES/B4.dxf
+PLATES/C1.dxf
+PLATES/C2.dxf
+PLATES/C3.dxf
+PLATES/C4.dxf
+PLATES/D1.dxf
+PLATES/D2.dxf
+PLATES/D3.dxf
+PLATES/D4.dxf
+PLATES/A1.dxf
+PLATES/A2.dxf
+PLATES/A3.dxf
+PLATES/A4.dxf
+PLATES/B1.dxf
+PLATES/B2.dxf
+PLATES/B3.dxf
+PLATES/B4.dxf
+PLATES/C1.dxf
+PLATES/C2.dxf
+PLATES/C3.dxf
+PLATES/C4.dxf
+PLATES/D1.dxf
+PLATES/D2.dxf
+PLATES/D3.dxf
+PLATES/D4.dxf
+install_potrace.py
+dxf_editor.py
+run_cutplate_test.py
+quick_test_cutplate.py
