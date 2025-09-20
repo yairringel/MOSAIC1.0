@@ -76,6 +76,8 @@ class Canvas(QWidget):
         self.line_smoothing_factor = 0.05  # Default smoothing factor for splines
         self.line_polygon_size = 15  # Default size in pixels for line polygons
         self.num_parallel_lines = 0  # Number of parallel lines on each side
+        self.line_polygon_gap = 2  # Gap between polygons in line mode
+        self.parallel_line_gap = 2  # Gap between parallel lines
         
         # Overlap visualization
         self.showing_overlaps = False
@@ -1174,7 +1176,7 @@ class Canvas(QWidget):
         
         # Create parallel lines on both sides
         for line_number in range(1, self.num_parallel_lines + 1):
-            offset_distance = (self.line_polygon_size + 2) * line_number  # Increased gap from +1 to +5
+            offset_distance = (self.line_polygon_size + self.parallel_line_gap) * line_number  # Configurable gap between parallel lines
             
             # Create line on positive side (right side when walking along the path)
             self.create_polygons_along_single_line(smooth_points, spline_data, offset_distance)
@@ -1210,7 +1212,7 @@ class Canvas(QWidget):
             return
             
         # Use distance-based spacing for consistent polygon sizes
-        gap_screen = 2  # Small gap between polygons
+        gap_screen = self.line_polygon_gap  # Configurable gap between polygons
         step_size = square_size + gap_screen  # Distance between polygon centers
         
         # But each trapezoid should be smaller than step_size to create the gap
@@ -2203,6 +2205,26 @@ class SidePanel(QFrame):
             self.parallel_lines_input.textChanged.connect(self.on_parallel_lines_changed)
             layout.addWidget(self.parallel_lines_input)
             
+            # Gap between parallel lines input
+            parallel_gap_label = QLabel('Gap Between Lines:')
+            layout.addWidget(parallel_gap_label)
+            
+            self.parallel_gap_input = QLineEdit()
+            self.parallel_gap_input.setText('2')  # Default gap value
+            self.parallel_gap_input.setPlaceholderText('Enter gap between parallel lines (e.g., 2)')
+            self.parallel_gap_input.textChanged.connect(self.on_parallel_gap_changed)
+            layout.addWidget(self.parallel_gap_input)
+            
+            # Gap between polygons input
+            gap_label = QLabel('Gap Between Polygons:')
+            layout.addWidget(gap_label)
+            
+            self.gap_input = QLineEdit()
+            self.gap_input.setText('2')  # Default gap value
+            self.gap_input.setPlaceholderText('Enter gap between polygons (e.g., 2)')
+            self.gap_input.textChanged.connect(self.on_gap_changed)
+            layout.addWidget(self.gap_input)
+            
             # Add show image checkbox
             self.show_image_checkbox = QCheckBox("Show Image")
             self.show_image_checkbox.setChecked(True)  # Checked by default
@@ -2509,6 +2531,30 @@ class SidePanel(QFrame):
                 # Clamp the value between reasonable bounds (0 to 10 parallel lines per side)
                 lines_value = max(0, min(10, lines_value))
                 self.canvas.num_parallel_lines = lines_value
+            except ValueError:
+                # If invalid input, keep the current value
+                pass
+    
+    def on_parallel_gap_changed(self, text):
+        """Handle gap between parallel lines parameter text change"""
+        if self.canvas:
+            try:
+                gap_value = float(text)
+                # Clamp the value between reasonable bounds (0 to 100 pixels)
+                gap_value = max(0.0, min(100.0, gap_value))
+                self.canvas.parallel_line_gap = gap_value
+            except ValueError:
+                # If invalid input, keep the current value
+                pass
+    
+    def on_gap_changed(self, text):
+        """Handle gap parameter text change"""
+        if self.canvas:
+            try:
+                gap_value = float(text)
+                # Clamp the value between reasonable bounds (0 to 50 pixels)
+                gap_value = max(0.0, min(50.0, gap_value))
+                self.canvas.line_polygon_gap = gap_value
             except ValueError:
                 # If invalid input, keep the current value
                 pass
