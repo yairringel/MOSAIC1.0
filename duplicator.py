@@ -2392,7 +2392,9 @@ class SidePanel(QFrame):
             (255, 255, 255), # White
             (255, 255, 0),  # Yellow
             (255, 0, 255),  # Magenta
-            (0, 255, 255)   # Cyan
+            (0, 255, 255),  # Cyan
+            (125, 125, 125), # Gray
+            (255, 125, 125)  # Light Pink
         ]
         
         # Create a horizontal layout for color buttons
@@ -2434,7 +2436,9 @@ class SidePanel(QFrame):
             (255, 255, 255), # White
             (255, 255, 0),  # Yellow
             (255, 0, 255),  # Magenta
-            (0, 255, 255)   # Cyan
+            (0, 255, 255),  # Cyan
+            (125, 125, 125), # Gray
+            (255, 125, 125)  # Light Pink
         ]
         
         for i, button in enumerate(self.color_buttons):
@@ -2711,6 +2715,23 @@ class SidePanel(QFrame):
         if not filename:
             return  # User cancelled
         
+        # Ask for scale factor
+        scale_text, ok = QInputDialog.getText(
+            self,
+            "Scale Factor",
+            "Enter scale percentage (default 100%):",
+            text="100"
+        )
+        
+        if not ok:
+            return  # User cancelled
+        
+        try:
+            scale_factor = float(scale_text) / 100.0  # Convert percentage to decimal
+            scale_factor = max(0.01, min(1000.0, scale_factor))  # Clamp between 1% and 1000%
+        except ValueError:
+            scale_factor = 1.0  # Default to 100% if invalid input
+        
         try:
             polygons = []
             
@@ -2731,22 +2752,26 @@ class SidePanel(QFrame):
                         
                         try:
                             coord_list = json.loads(coords_str)
-                            # Convert loaded coordinates to current grid position
+                            # Convert loaded coordinates to current grid position and apply scale
                             # Add current grid offset to make coordinates match current grid
                             points = []
                             for point in coord_list:
-                                adjusted_x = float(point[0]) + self.canvas.grid_offset_x
-                                adjusted_y = float(point[1]) + self.canvas.grid_offset_y
+                                scaled_x = float(point[0]) * scale_factor
+                                scaled_y = float(point[1]) * scale_factor
+                                adjusted_x = scaled_x + self.canvas.grid_offset_x
+                                adjusted_y = scaled_y + self.canvas.grid_offset_y
                                 points.append((adjusted_x, adjusted_y))
                         except:
                             # Fallback to ast parsing for backward compatibility
                             import ast
                             coord_list = ast.literal_eval(coords_str)
-                            # Convert loaded coordinates to current grid position
+                            # Convert loaded coordinates to current grid position and apply scale
                             points = []
                             for point in coord_list:
-                                adjusted_x = float(point[0]) + self.canvas.grid_offset_x
-                                adjusted_y = float(point[1]) + self.canvas.grid_offset_y
+                                scaled_x = float(point[0]) * scale_factor
+                                scaled_y = float(point[1]) * scale_factor
+                                adjusted_x = scaled_x + self.canvas.grid_offset_x
+                                adjusted_y = scaled_y + self.canvas.grid_offset_y
                                 points.append((adjusted_x, adjusted_y))
                         
                         if len(points) < 3:
@@ -2836,7 +2861,7 @@ class SidePanel(QFrame):
                 QMessageBox.information(
                     self, 
                     "Success", 
-                    f"Loaded {len(polygons)} polygons from {filename}"
+                    f"Loaded {len(polygons)} polygons from {filename} with {scale_factor*100:.1f}% scale"
                 )
             else:
                 QMessageBox.warning(self, "Warning", "No valid polygons found in the file.")
