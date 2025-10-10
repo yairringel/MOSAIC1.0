@@ -95,6 +95,10 @@ class Canvas(QWidget):
         self.is_dragging_control_point = False
         self.control_point_size = 8  # Size of control point circles in pixels
         
+        # Polygon dragging
+        self.is_dragging_polygon = False
+        self.polygon_drag_start = None  # Starting position for polygon drag
+        
         # Circle drawing
         # Image drag handle
         self.is_dragging_image = False
@@ -938,7 +942,7 @@ class Canvas(QWidget):
                 self.setCursor(Qt.ClosedHandCursor)
                 self.update()
             else:
-                # Check for polygon selection, mandala click, or paint
+                # Check for polygon selection, mandala click, paint, or start dragging
                 world_x, world_y = self.screen_to_world(event.x(), event.y())
                 
                 # If mandala click mode is enabled, create mandala copies of clicked polygon
@@ -948,7 +952,17 @@ class Canvas(QWidget):
                 elif self.paint_mode:
                     self.paint_polygon_at_point(world_x, world_y)
                 else:
-                    self.select_polygon_at_point(world_x, world_y)
+                    # Check if clicking on an already selected polygon to start dragging
+                    if (self.selected_polygon_index >= 0 and 
+                        self.selected_polygon_index < len(self.polygons) and
+                        self.point_in_polygon(world_x, world_y, self.polygons[self.selected_polygon_index]['points'])):
+                        # Start dragging the selected polygon
+                        self.is_dragging_polygon = True
+                        self.polygon_drag_start = (world_x, world_y)
+                        self.setCursor(Qt.ClosedHandCursor)
+                    else:
+                        # Select polygon at point (or deselect if clicking empty space)
+                        self.select_polygon_at_point(world_x, world_y)
         elif event.button() == Qt.MiddleButton:
             # Start panning
             self.is_panning = True
@@ -1006,6 +1020,23 @@ class Canvas(QWidget):
             self.grid_offset_x = new_world_x
             self.grid_offset_y = new_world_y
             self.update()
+            
+        elif self.is_dragging_polygon and self.polygon_drag_start:
+            # Drag polygon by calculating movement delta
+            world_x, world_y = self.screen_to_world(event.x(), event.y())
+            start_x, start_y = self.polygon_drag_start
+            
+            # Calculate movement delta
+            delta_x = world_x - start_x
+            delta_y = world_y - start_y
+            
+            # Move the selected polygon and its group
+            if self.selected_polygon_index >= 0:
+                self.move_polygon_group(self.selected_polygon_index, delta_x, delta_y)
+                
+                # Update drag start point for next movement
+                self.polygon_drag_start = (world_x, world_y)
+                self.update()
             
         elif self.is_dragging_control_point and self.selected_control_point >= 0:
             # Drag control point to reshape polygon and optionally its group
@@ -1094,6 +1125,11 @@ class Canvas(QWidget):
             self.grid_dragging = False
             self.grid_drag_start = None
             self.grid_drag_world_start = None
+            self.setCursor(Qt.ArrowCursor)
+        elif self.is_dragging_polygon:
+            # Stop dragging polygon
+            self.is_dragging_polygon = False
+            self.polygon_drag_start = None
             self.setCursor(Qt.ArrowCursor)
         elif self.is_panning:
             self.is_panning = False
@@ -1519,8 +1555,113 @@ class Canvas(QWidget):
         
         self.update()  # Refresh display
 
+    def rotate_polygon(self, polygon_index, angle_degrees):
+        """Rotate a polygon around its center by the given angle in degrees"""
+        if polygon_index < 0 or polygon_index >= len(self.polygons):
+            return
+            
+        polygon = self.polygons[polygon_index]
+        points = polygon['points']
+        
+        if len(points) < 3:
+            return
+            
+        # Calculate polygon center
+        center_x = sum(point[0] for point in points) / len(points)
+        center_y = sum(point[1] for point in points) / len(points)
+        
+        # Convert angle to radians
+        angle_radians = math.radians(angle_degrees)
+        
+        # Rotate each point around the center
+        rotated_points = []
+        for world_x, world_y in points:
+            # Translate to origin (relative to center)
+            rel_x = world_x - center_x
+            rel_y = world_y - center_y
+            
+            # Apply rotation
+            rotated_x = rel_x * math.cos(angle_radians) - rel_y * math.sin(angle_radians)
+            rotated_y = rel_x * math.sin(angle_radians) + rel_y * math.cos(angle_radians)
+            
+            # Translate back
+            final_x = rotated_x + center_x
+            final_y = rotated_y + center_y
+            
+            rotated_points.append((final_x, final_y))
+        
+        # Update the polygon with rotated points
+        polygon['points'] = rotated_points
+
+    def rotate_polygon_group(self, polygon_index, angle_degrees):
+        """Rotate a polygon and all its copies if duplicate mode is enabled"""
+        if polygon_index < 0 or polygon_index >= len(self.polygons):
+            return
+            
+        # Rotate the selected polygon
+        self.rotate_polygon(polygon_index, angle_degrees)
+        
+        # If duplicate mode is enabled, rotate all polygons in the same group
+        if self.duplicate_mode:
+            selected_polygon = self.polygons[polygon_index]
+            group_id = selected_polygon.get('group_id')
+            
+            if group_id is not None:
+                # Find all polygons with the same group ID and rotate them
+                for i, polygon in enumerate(self.polygons):
+                    if i != polygon_index and polygon.get('group_id') == group_id:
+                        self.rotate_polygon(i, angle_degrees)
+
+    def move_polygon(self, polygon_index, delta_x, delta_y):
+        """Move a polygon by the given offset"""
+        if polygon_index < 0 or polygon_index >= len(self.polygons):
+            return
+            
+        polygon = self.polygons[polygon_index]
+        points = polygon['points']
+        
+        # Move each point by the delta
+        moved_points = []
+        for world_x, world_y in points:
+            moved_points.append((world_x + delta_x, world_y + delta_y))
+        
+        # Update the polygon with moved points
+        polygon['points'] = moved_points
+
+    def move_polygon_group(self, polygon_index, delta_x, delta_y):
+        """Move a polygon and all its copies if duplicate mode is enabled"""
+        if polygon_index < 0 or polygon_index >= len(self.polygons):
+            return
+            
+        # Move the selected polygon
+        self.move_polygon(polygon_index, delta_x, delta_y)
+        
+        # If duplicate mode is enabled, move all polygons in the same group
+        if self.duplicate_mode:
+            selected_polygon = self.polygons[polygon_index]
+            group_id = selected_polygon.get('group_id')
+            
+            if group_id is not None:
+                # Find all polygons with the same group ID and move them
+                for i, polygon in enumerate(self.polygons):
+                    if i != polygon_index and polygon.get('group_id') == group_id:
+                        self.move_polygon(i, delta_x, delta_y)
+
     def wheelEvent(self, event):
-        """Handle mouse wheel events for zooming"""
+        """Handle mouse wheel events for zooming or polygon rotation"""
+        # If a polygon is selected, use wheel for rotation instead of zoom
+        if self.selected_polygon_index >= 0:
+            # Calculate rotation angle based on wheel direction
+            wheel_delta = event.angleDelta().y()
+            rotation_angle = 2 if wheel_delta > 0 else -2  # 5 degrees per wheel step
+            
+            # Rotate the selected polygon (and its copies if duplicate mode is on)
+            self.rotate_polygon_group(self.selected_polygon_index, rotation_angle)
+            
+            self.update()  # Refresh display
+            return
+        
+        # No polygon selected - proceed with normal zoom behavior
         # Get mouse position before zoom
         mouse_pos = event.pos()
         old_world_x, old_world_y = self.screen_to_world(mouse_pos.x(), mouse_pos.y())

@@ -1268,7 +1268,7 @@ class ControlPanel(QWidget):
                 writer = csv.writer(csvfile)
                 
                 # Write header
-                writer.writerow(['polygon_id', 'box_name', 'coordinates', 'color_r', 'color_g', 'color_b', 'color_a', 'area'])
+                writer.writerow(['polygon_id', 'box_name', 'coordinates', 'color_r', 'color_g', 'color_b', 'color_a', 'color_hex', 'area'])
                 
                 # Write all polygons from all boxes
                 global_polygon_id = 0
@@ -1298,8 +1298,11 @@ class ControlPanel(QWidget):
                         b = original_color.blue() / 255.0
                         a = original_color.alpha() / 255.0
                         
+                        # Get hex color code
+                        color_hex = original_color.name()  # Returns hex format like #FF0000
+                        
                         # Write row
-                        writer.writerow([global_polygon_id, box_label, coords_json, r, g, b, a, poly_area])
+                        writer.writerow([global_polygon_id, box_label, coords_json, r, g, b, a, color_hex, poly_area])
                         global_polygon_id += 1
             
             # Save color summary CSV
@@ -1345,7 +1348,7 @@ class ControlPanel(QWidget):
         import csv
         
         with open(filename, 'w', newline='') as csvfile:
-            fieldnames = ['coordinates', 'color_r', 'color_g', 'color_b', 'color_a']
+            fieldnames = ['coordinates', 'color_r', 'color_g', 'color_b', 'color_a', 'color_hex']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
 
@@ -1385,12 +1388,16 @@ class ControlPanel(QWidget):
                     b = color.blue() / 255.0
                     a = color.alpha() / 255.0
                     
+                    # Get hex color code
+                    color_hex = color.name()  # Returns hex format like #FF0000
+                    
                     writer.writerow({
                         'coordinates': coord_str,
                         'color_r': r,
                         'color_g': g,
                         'color_b': b,
-                        'color_a': a
+                        'color_a': a,
+                        'color_hex': color_hex
                     })
     
     def save_polygons_to_dxf(self, polygons_data, dxf_filepath, box_name, box_index=None):
