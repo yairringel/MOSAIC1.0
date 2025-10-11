@@ -18,6 +18,44 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QPoint, QTimer
 from PyQt5.QtGui import QPainter, QColor, QPen, QPixmap, QBrush, QFont, QPolygon, QCursor
 
+class ContinuousButton(QPushButton):
+    """Custom button that supports continuous action when held down"""
+    def __init__(self, text, callback, *args):
+        super().__init__(text)
+        self.callback = callback
+        self.args = args
+        self.press_timer = QTimer()
+        self.repeat_timer = QTimer()
+        
+        # Set up timers
+        self.press_timer.setSingleShot(True)
+        self.press_timer.timeout.connect(self.start_continuous)
+        
+        self.repeat_timer.timeout.connect(self.execute_action)
+        
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            # Execute once immediately
+            self.execute_action()
+            # Start timer for continuous action after 1 second
+            self.press_timer.start(1000)  # 1 second delay
+        super().mousePressEvent(event)
+        
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            # Stop all timers
+            self.press_timer.stop()
+            self.repeat_timer.stop()
+        super().mouseReleaseEvent(event)
+        
+    def start_continuous(self):
+        """Start continuous execution"""
+        self.repeat_timer.start(50)  # Repeat every 50ms for smooth movement
+        
+    def execute_action(self):
+        """Execute the callback with arguments"""
+        self.callback(*self.args)
+
 
 class Canvas(QWidget):
     """Central canvas widget for drawing/displaying content"""
@@ -66,6 +104,9 @@ class Canvas(QWidget):
         
         # Paint mode
         self.paint_mode = False  # Whether to paint polygons with selected color on click
+        
+        # Random mode
+        self.random_mode = False  # Whether to apply random variations in polygon drawing
         
         # Line mode
         self.line_mode = False  # Whether to draw lines and create square polygons along them
@@ -1322,9 +1363,14 @@ class Canvas(QWidget):
             start_x, start_y, start_angle = get_position_and_angle_at_distance(start_distance)
             end_x, end_y, end_angle = get_position_and_angle_at_distance(end_distance)
             
-            # Random size variation: 80% to 100% of original size
-            size_variation = random.uniform(0.8, 1.0)
-            random_half_size = half_size * size_variation
+            # Apply random size variation only if random mode is enabled
+            if self.random_mode:
+                # Random size variation: 80% to 100% of original size
+                size_variation = random.uniform(0.8, 1.0)
+                random_half_size = half_size * size_variation
+            else:
+                # Use original size without variation
+                random_half_size = half_size
             
             # Create perpendicular lines at start and end positions
             start_perp_angle = start_angle + math.pi/2
@@ -1347,18 +1393,24 @@ class Canvas(QWidget):
                 line_end_p1
             ]
             
-            # Add random movement to each control point (-1 to +1 pixels on X and Y)
-            randomized_polygon_points = []
-            for point in polygon_points:
-                x, y = point
-                random_x_offset = random.uniform(-1, 1)
-                random_y_offset = random.uniform(-1, 1)
-                randomized_point = (x + random_x_offset, y + random_y_offset)
-                randomized_polygon_points.append(randomized_point)
+            # Apply random movement to control points only if random mode is enabled
+            if self.random_mode:
+                # Add random movement to each control point (-1 to +1 pixels on X and Y)
+                randomized_polygon_points = []
+                for point in polygon_points:
+                    x, y = point
+                    random_x_offset = random.uniform(-1, 1)
+                    random_y_offset = random.uniform(-1, 1)
+                    randomized_point = (x + random_x_offset, y + random_y_offset)
+                    randomized_polygon_points.append(randomized_point)
+                final_polygon_points = randomized_polygon_points
+            else:
+                # Use original points without randomization
+                final_polygon_points = polygon_points
             
             # Create polygon data
             polygon_data = {
-                'points': randomized_polygon_points,
+                'points': final_polygon_points,
                 'color': QColor(0, 0, 0, 0),  # Transparent fill
                 'frame_color': QColor(0, 0, 0, 255),  # Black frame
                 'group_id': None  # Line polygons are not grouped by default
@@ -1392,7 +1444,7 @@ class Canvas(QWidget):
                 # Create each duplicate with same group ID
                 for (offset_x, offset_y), frame_color in offsets_and_colors:
                     duplicate_points = []
-                    for point in randomized_polygon_points:
+                    for point in final_polygon_points:
                         new_x = point[0] + offset_x
                         new_y = point[1] + offset_y
                         duplicate_points.append((new_x, new_y))
@@ -2250,6 +2302,45 @@ class SidePanel(QFrame):
             undo_button.clicked.connect(self.canvas.undo_last_action)
             layout.addWidget(undo_button)
             
+            # Add background image movement controls
+            bg_movement_label = QLabel('Move Background:')
+            layout.addWidget(bg_movement_label)
+            
+            # Create arrow buttons layout
+            arrow_layout = QVBoxLayout()
+            
+            # Up arrow button
+            up_button = ContinuousButton("↑", self.move_background_image, 0, -1)
+            up_button.setMaximumSize(40, 30)
+            up_button.setToolTip("Move background image up (hold for continuous movement)")
+            
+            # Middle row with left and right arrows
+            middle_layout = QHBoxLayout()
+            left_button = ContinuousButton("←", self.move_background_image, -1, 0)
+            left_button.setMaximumSize(40, 30)
+            left_button.setToolTip("Move background image left (hold for continuous movement)")
+            
+            right_button = ContinuousButton("→", self.move_background_image, 1, 0)
+            right_button.setMaximumSize(40, 30)
+            right_button.setToolTip("Move background image right (hold for continuous movement)")
+            
+            middle_layout.addWidget(left_button)
+            middle_layout.addStretch()
+            middle_layout.addWidget(right_button)
+            
+            # Down arrow button
+            down_button = ContinuousButton("↓", self.move_background_image, 0, 1)
+            down_button.setMaximumSize(40, 30)
+            down_button.setToolTip("Move background image down (hold for continuous movement)")
+            
+            # Add buttons to arrow layout
+            arrow_layout.addWidget(up_button, 0, Qt.AlignCenter)
+            arrow_layout.addLayout(middle_layout)
+            arrow_layout.addWidget(down_button, 0, Qt.AlignCenter)
+            
+            # Add arrow layout to main layout
+            layout.addLayout(arrow_layout)
+            
             # Add color palette section
             color_label = QLabel('Color Palette:')
             layout.addWidget(color_label)
@@ -2305,6 +2396,11 @@ class SidePanel(QFrame):
             self.paint_checkbox = QCheckBox("Paint")
             self.paint_checkbox.toggled.connect(self.on_paint_toggled)
             layout.addWidget(self.paint_checkbox)
+            
+            # Add random mode checkbox
+            self.random_checkbox = QCheckBox("Random")
+            self.random_checkbox.toggled.connect(self.on_random_toggled)
+            layout.addWidget(self.random_checkbox)
             
             # Add duplicate button
             duplicate_button = QPushButton("Duplicate")
@@ -2457,6 +2553,18 @@ class SidePanel(QFrame):
                 self.y_scale_input.setText('100')
                 self.y_scale_input.blockSignals(False)
     
+    def move_background_image(self, delta_x, delta_y):
+        """Move background image by the specified delta in pixels"""
+        if not self.canvas or not self.canvas.background_image:
+            return
+            
+        # Move the background image offset
+        self.canvas.image_offset_x += delta_x
+        self.canvas.image_offset_y += delta_y
+        
+        # Update the canvas display
+        self.canvas.update()
+    
     def on_polygon_toggled(self, checked):
         """Handle polygon checkbox toggle"""
         if self.canvas:
@@ -2490,6 +2598,11 @@ class SidePanel(QFrame):
         """Handle paint mode checkbox toggle"""
         if self.canvas:
             self.canvas.paint_mode = checked
+    
+    def on_random_toggled(self, checked):
+        """Handle random mode checkbox toggle"""
+        if self.canvas:
+            self.canvas.random_mode = checked
     
     def remove_mandala_click_markings(self):
         """Remove green fill from polygons that were marked in mandala click mode"""
