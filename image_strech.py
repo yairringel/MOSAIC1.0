@@ -93,6 +93,7 @@ class ImageCanvas(QWidget):
             # alpha = contrast (1.0 is original), beta = brightness (0 is original)
             alpha = effects.get('contrast', 1.0)
             beta = effects.get('brightness', 0)
+            black_point = effects.get('black_point', 0)
             
             # 2. Saturation
             sat_scale = effects.get('saturation', 1.0)
@@ -112,6 +113,10 @@ class ImageCanvas(QWidget):
             
             # Only process if mask is not empty
             if np.sum(roi_mask) > 0:
+                # Black Point - crush blacks
+                if black_point > 0:
+                    roi = np.maximum(0, roi - black_point)
+                
                 # Brightness/Contrast
                 roi = roi * alpha + beta
                 roi = np.clip(roi, 0, 255)
@@ -212,7 +217,8 @@ class ImageCanvas(QWidget):
                                 'saturation': 1.0,
                                 'warmth': 0,
                                 'tint_color': (255, 255, 255),
-                                'tint_strength': 0
+                                'tint_strength': 0,
+                                'black_point': 0
                             })
                             self.current_polygon = []
                             # self.drawing_polygon = False # Keep drawing mode active
@@ -291,6 +297,16 @@ class ImageCanvas(QWidget):
             self.dragging_point_index = None
             self.selection_changed.emit(-1)
             self.update()
+        elif event.key() == Qt.Key_Delete:
+            if self.selected_polygon_index is not None:
+                # Delete the selected polygon and its effects
+                self.polygons.pop(self.selected_polygon_index)
+                self.polygon_effects.pop(self.selected_polygon_index)
+                self.selected_polygon_index = None
+                self.dragging_point_index = None
+                self.selection_changed.emit(-1)
+                self.apply_effects()
+                self.update()
 
     def perform_stretch(self):
         if len(self.points) != 4:
@@ -571,6 +587,11 @@ class MainWindow(QMainWindow):
         self.warmth_slider.setValue(0)
         self.warmth_slider.valueChanged.connect(self.update_effects)
         
+        self.black_point_slider = QSlider(Qt.Horizontal)
+        self.black_point_slider.setRange(0, 100)
+        self.black_point_slider.setValue(0)
+        self.black_point_slider.valueChanged.connect(self.update_effects)
+        
         self.tint_btn = QPushButton("Select Tint Color")
         self.tint_btn.clicked.connect(self.select_tint_color)
         self.tint_btn.setStyleSheet("background-color: white; color: black;")
@@ -596,6 +617,7 @@ class MainWindow(QMainWindow):
         effects_layout.addRow("Contrast", self.contrast_slider)
         effects_layout.addRow("Saturation", self.saturation_slider)
         effects_layout.addRow("Warmth", self.warmth_slider)
+        effects_layout.addRow("Black Point", self.black_point_slider)
         effects_layout.addRow("Tint Color", self.tint_btn)
         effects_layout.addRow("Tint Strength", self.tint_strength_slider)
         
@@ -628,12 +650,14 @@ class MainWindow(QMainWindow):
             self.contrast_slider.blockSignals(True)
             self.saturation_slider.blockSignals(True)
             self.warmth_slider.blockSignals(True)
+            self.black_point_slider.blockSignals(True)
             self.tint_strength_slider.blockSignals(True)
             
             self.brightness_slider.setValue(int(effects.get('brightness', 0)))
             self.contrast_slider.setValue(int(effects.get('contrast', 1.0) * 100))
             self.saturation_slider.setValue(int(effects.get('saturation', 1.0) * 100))
             self.warmth_slider.setValue(int(effects.get('warmth', 0)))
+            self.black_point_slider.setValue(int(effects.get('black_point', 0)))
             self.tint_strength_slider.setValue(int(effects.get('tint_strength', 0)))
             
             # Update tint button color
@@ -644,6 +668,7 @@ class MainWindow(QMainWindow):
             self.contrast_slider.blockSignals(False)
             self.saturation_slider.blockSignals(False)
             self.warmth_slider.blockSignals(False)
+            self.black_point_slider.blockSignals(False)
             self.tint_strength_slider.blockSignals(False)
 
     def select_tint_color(self):
@@ -688,6 +713,7 @@ class MainWindow(QMainWindow):
             effects['contrast'] = self.contrast_slider.value() / 100.0
             effects['saturation'] = self.saturation_slider.value() / 100.0
             effects['warmth'] = self.warmth_slider.value()
+            effects['black_point'] = self.black_point_slider.value()
             effects['tint_strength'] = self.tint_strength_slider.value()
             
             self.canvas.apply_effects()
