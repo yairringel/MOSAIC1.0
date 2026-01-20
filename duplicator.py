@@ -2540,8 +2540,61 @@ class SidePanel(QFrame):
         )
         
         if file_path:
-            # Load image at original size without popup
-            self.canvas.set_background_image(file_path)
+            # Ask for target resolution
+            width, ok_width = QInputDialog.getInt(
+                self,
+                "Target Resolution",
+                "Enter target width (pixels):",
+                value=1000,
+                min=1,
+                max=100000
+            )
+            
+            if not ok_width:
+                return
+            
+            height, ok_height = QInputDialog.getInt(
+                self,
+                "Target Resolution",
+                "Enter target height (pixels):",
+                value=1000,
+                min=1,
+                max=100000
+            )
+            
+            if not ok_height:
+                return
+            
+            # Load the original image first
+            from PyQt5.QtGui import QPixmap
+            original_pixmap = QPixmap(file_path)
+            if original_pixmap.isNull():
+                QMessageBox.warning(self, "Error", "Failed to load image.")
+                return
+            
+            # Resize to target resolution
+            resized_pixmap = original_pixmap.scaled(
+                width, height,
+                Qt.IgnoreAspectRatio,
+                Qt.SmoothTransformation
+            )
+            
+            # Save the resized image temporarily and load it
+            import tempfile
+            import os
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
+            temp_path = temp_file.name
+            temp_file.close()
+            
+            resized_pixmap.save(temp_path)
+            self.canvas.set_background_image(temp_path)
+            
+            # Clean up temp file
+            try:
+                os.unlink(temp_path)
+            except:
+                pass
+            
             # Reset scale inputs to 100%
             if hasattr(self, 'x_scale_input'):
                 self.x_scale_input.blockSignals(True)  # Prevent triggering scale change

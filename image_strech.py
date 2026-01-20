@@ -29,6 +29,10 @@ class ImageCanvas(QWidget):
         self.drawing_polygon = False
         self.selected_polygon_index = None
         self.dragging_point_index = None
+        self.image_tilt = 0  # Tilt angle for the entire image (horizontal)
+        self.vertical_tilt = 0  # Tilt angle for vertical middle axis
+        self.stretch_drag_start = None  # Starting point for stretch rectangle drag
+        self.stretch_drag_current = None  # Current point during stretch rectangle drag
         self.setFocusPolicy(Qt.StrongFocus)
         self.setMinimumSize(400, 400)
 
@@ -73,7 +77,61 @@ class ImageCanvas(QWidget):
         if self.cv_image is None:
             return
 
-        self.display_image = self.cv_image.copy()
+        # Apply tilt to the entire image first
+        if self.image_tilt != 0 or self.vertical_tilt != 0:
+            img_h, img_w = self.cv_image.shape[:2]
+            
+            # Source points (corners of image)
+            src_pts = np.float32([
+                [0, 0],
+                [img_w, 0],
+                [img_w, img_h],
+                [0, img_h]
+            ])
+            
+            # Start with original corners
+            dst_pts = np.float32([
+                [0, 0],
+                [img_w, 0],
+                [img_w, img_h],
+                [0, img_h]
+            ])
+            
+            # Apply horizontal tilt (image_tilt)
+            if self.image_tilt != 0:
+                angle_rad = np.deg2rad(self.image_tilt)
+                offset = img_w * np.tan(angle_rad) * 0.5
+                
+                dst_pts = np.float32([
+                    [max(0, offset), 0],
+                    [min(img_w, img_w - offset), 0],
+                    [min(img_w, img_w + offset), img_h],
+                    [max(0, -offset), img_h]
+                ])
+            
+            # Apply vertical tilt (vertical_tilt)
+            if self.vertical_tilt != 0:
+                angle_rad = np.deg2rad(self.vertical_tilt)
+                offset = img_h * np.tan(angle_rad) * 0.5
+                
+                # Adjust y-coordinates for vertical tilt
+                # Top edge shifts, bottom edge shifts opposite
+                dst_pts = np.float32([
+                    [dst_pts[0][0], max(0, -offset)],
+                    [dst_pts[1][0], max(0, offset)],
+                    [dst_pts[2][0], min(img_h, img_h - offset)],
+                    [dst_pts[3][0], min(img_h, img_h + offset)]
+                ])
+            
+            # Get perspective transform matrix
+            M = cv2.getPerspectiveTransform(src_pts, dst_pts)
+            
+            # Apply perspective transformation
+            self.display_image = cv2.warpPerspective(self.cv_image, M, (img_w, img_h), 
+                                                     borderMode=cv2.BORDER_CONSTANT, 
+                                                     borderValue=(0, 0, 0))
+        else:
+            self.display_image = self.cv_image.copy()
         
         for i, poly in enumerate(self.polygons):
             if i >= len(self.polygon_effects):
@@ -168,6 +226,8 @@ class ImageCanvas(QWidget):
         self.selecting_mode = True
         self.drawing_polygon = False
         self.points = []
+        self.stretch_drag_start = None
+        self.stretch_drag_current = None
         self.update()
 
     def start_polygon_drawing(self):
@@ -196,12 +256,10 @@ class ImageCanvas(QWidget):
             if 0 <= img_x < self.image.width() and 0 <= img_y < self.image.height() or (not self.selecting_mode and not self.drawing_polygon):
                 
                 if self.selecting_mode:
-                    self.points.append((img_x, img_y))
+                    # Start rectangle drag
+                    self.stretch_drag_start = (img_x, img_y)
+                    self.stretch_drag_current = (img_x, img_y)
                     self.update()
-                    
-                    if len(self.points) == 4:
-                        self.perform_stretch()
-                        self.selecting_mode = False
                 
                 elif self.drawing_polygon:
                     if event.button() == Qt.LeftButton:
@@ -277,7 +335,26 @@ class ImageCanvas(QWidget):
         self.update()
 
     def mouseMoveEvent(self, event):
-        if self.dragging_point_index is not None and self.selected_polygon_index is not None:
+        if self.selecting_mode and self.stretch_drag_start is not None:
+            # Update current drag position for stretch rectangle
+            pos = event.pos()
+            img_x = pos.x() / self.scale_factor
+            img_y = pos.y() / self.scale_factor
+            
+            # Constrain to square
+            start_x, start_y = self.stretch_drag_start
+            dx = img_x - start_x
+            dy = img_y - start_y
+            
+            # Use the larger dimension to create a square
+            size = max(abs(dx), abs(dy))
+            # Maintain direction
+            square_x = start_x + (size if dx >= 0 else -size)
+            square_y = start_y + (size if dy >= 0 else -size)
+            
+            self.stretch_drag_current = (square_x, square_y)
+            self.update()
+        elif self.dragging_point_index is not None and self.selected_polygon_index is not None:
              pos = event.pos()
              img_x = pos.x() / self.scale_factor
              img_y = pos.y() / self.scale_factor
@@ -289,7 +366,30 @@ class ImageCanvas(QWidget):
              self.update()
 
     def mouseReleaseEvent(self, event):
-        self.dragging_point_index = None
+        if self.selecting_mode and self.stretch_drag_start is not None and self.stretch_drag_current is not None:
+            # Convert rectangle to 4 points and perform stretch
+            x1, y1 = self.stretch_drag_start
+            x2, y2 = self.stretch_drag_current
+            
+            # Create 4 corner points from the rectangle
+            self.points = [
+                (min(x1, x2), min(y1, y2)),  # top-left
+                (max(x1, x2), min(y1, y2)),  # top-right
+                (max(x1, x2), max(y1, y2)),  # bottom-right
+                (min(x1, x2), max(y1, y2))   # bottom-left
+            ]
+            
+            # Only perform stretch if rectangle has some size
+            if abs(x2 - x1) > 5 and abs(y2 - y1) > 5:
+                self.perform_stretch()
+            
+            # Reset stretch mode
+            self.selecting_mode = False
+            self.stretch_drag_start = None
+            self.stretch_drag_current = None
+            self.update()
+        else:
+            self.dragging_point_index = None
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
@@ -459,21 +559,20 @@ class ImageCanvas(QWidget):
             for pt in self.current_polygon:
                 painter.drawPoint(QPointF(pt[0], pt[1]))
 
-        # Draw selection points and lines (Stretch mode)
-        if self.selecting_mode and self.points:
-            painter.setPen(QPen(Qt.red, 8))
-            for pt in self.points:
-                painter.drawPoint(QPointF(pt[0], pt[1]))
+        # Draw stretch rectangle during drag
+        if self.selecting_mode and self.stretch_drag_start is not None and self.stretch_drag_current is not None:
+            x1, y1 = self.stretch_drag_start
+            x2, y2 = self.stretch_drag_current
             
-            if len(self.points) > 1:
-                painter.setPen(QPen(Qt.yellow, 2))
-                for i in range(len(self.points) - 1):
-                    painter.drawLine(QPointF(self.points[i][0], self.points[i][1]), 
-                                     QPointF(self.points[i+1][0], self.points[i+1][1]))
-                # Close the loop if 4 points (though it processes immediately)
-                if len(self.points) == 4:
-                     painter.drawLine(QPointF(self.points[3][0], self.points[3][1]), 
-                                     QPointF(self.points[0][0], self.points[0][1]))
+            # Draw rectangle
+            painter.setPen(QPen(Qt.yellow, 2))
+            from PyQt5.QtCore import QRectF
+            painter.drawRect(QRectF(min(x1, x2), min(y1, y2), abs(x2 - x1), abs(y2 - y1)))
+            
+            # Draw corner points
+            painter.setPen(QPen(Qt.red, 8))
+            painter.drawPoint(QPointF(x1, y1))
+            painter.drawPoint(QPointF(x2, y2))
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -522,6 +621,12 @@ class MainWindow(QMainWindow):
         save_btn = QPushButton("Save Image")
         save_btn.clicked.connect(self.save_image)
         
+        save_array_btn = QPushButton("Save Array")
+        save_array_btn.clicked.connect(self.save_array)
+        
+        load_array_btn = QPushButton("Load Array")
+        load_array_btn.clicked.connect(self.load_array)
+        
         save_project_btn = QPushButton("Save Project")
         save_project_btn.clicked.connect(self.save_project)
         
@@ -530,14 +635,14 @@ class MainWindow(QMainWindow):
         
         # Resolution inputs
         self.width_spin = QSpinBox()
-        self.width_spin.setRange(1, 10000)
+        self.width_spin.setRange(1, 20000)
         self.width_spin.setValue(300)
         self.width_spin.setSuffix(" px")
         self.width_spin.setToolTip("Target Width")
         self.width_spin.valueChanged.connect(self.update_resolution)
         
         self.height_spin = QSpinBox()
-        self.height_spin.setRange(1, 10000)
+        self.height_spin.setRange(1, 20000)
         self.height_spin.setValue(300)
         self.height_spin.setSuffix(" px")
         self.height_spin.setToolTip("Target Height")
@@ -548,6 +653,8 @@ class MainWindow(QMainWindow):
         sidebar_layout.addWidget(self.stretch_btn)
         sidebar_layout.addWidget(self.polygon_btn)
         sidebar_layout.addWidget(save_btn)
+        sidebar_layout.addWidget(save_array_btn)
+        sidebar_layout.addWidget(load_array_btn)
         sidebar_layout.addWidget(save_project_btn)
         sidebar_layout.addWidget(load_project_btn)
         
@@ -559,6 +666,26 @@ class MainWindow(QMainWindow):
         size_layout.addWidget(QLabel("x"))
         size_layout.addWidget(self.height_spin)
         sidebar_layout.addLayout(size_layout)
+        
+        sidebar_layout.addSpacing(20)
+        
+        # Image Tilt Control (applies to entire image)
+        tilt_group = QGroupBox("Image Tilt")
+        tilt_layout = QFormLayout()
+        self.image_tilt_slider = QSlider(Qt.Horizontal)
+        self.image_tilt_slider.setRange(-45, 45)
+        self.image_tilt_slider.setValue(0)
+        self.image_tilt_slider.valueChanged.connect(self.update_image_tilt)
+        tilt_layout.addRow("Horizontal Tilt", self.image_tilt_slider)
+        
+        self.vertical_tilt_slider = QSlider(Qt.Horizontal)
+        self.vertical_tilt_slider.setRange(-45, 45)
+        self.vertical_tilt_slider.setValue(0)
+        self.vertical_tilt_slider.valueChanged.connect(self.update_vertical_tilt)
+        tilt_layout.addRow("Vertical Tilt", self.vertical_tilt_slider)
+        
+        tilt_group.setLayout(tilt_layout)
+        sidebar_layout.addWidget(tilt_group)
         
         sidebar_layout.addSpacing(20)
         
@@ -718,6 +845,14 @@ class MainWindow(QMainWindow):
             
             self.canvas.apply_effects()
 
+    def update_image_tilt(self):
+        self.canvas.image_tilt = self.image_tilt_slider.value()
+        self.canvas.apply_effects()
+    
+    def update_vertical_tilt(self):
+        self.canvas.vertical_tilt = self.vertical_tilt_slider.value()
+        self.canvas.apply_effects()
+
     def start_stretch_mode(self):
         # Uncheck polygon button if checked
         if self.polygon_btn.isChecked():
@@ -749,6 +884,169 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, "Save Image", "stretched.png", "Images (*.png *.jpg *.jpeg *.bmp)")
         if path:
             self.canvas.image.save(path)
+    
+    def save_array(self):
+        """Save polygons to CSV file compatible with mosaic_editor_pyqt"""
+        if not self.canvas.polygons:
+            QMessageBox.warning(self, "Warning", "No polygons to save.")
+            return
+        
+        # Open file dialog to choose save location
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Array as CSV",
+            "",
+            "CSV Files (*.csv);;All Files (*)"
+        )
+        
+        if not filename:
+            return  # User cancelled
+        
+        try:
+            import csv
+            import json
+            with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile)
+                
+                # Write header with frame color support and group ID
+                writer.writerow(['polygon_id', 'coordinates', 'color_r', 'color_g', 'color_b', 'color_a', 
+                               'frame_r', 'frame_g', 'frame_b', 'frame_a', 'group_id'])
+                
+                # Write each polygon
+                for i, points in enumerate(self.canvas.polygons):
+                    # Convert points to list of lists
+                    adjusted_points = [[float(x), float(y)] for x, y in points]
+                    
+                    # Convert points to JSON string format
+                    coords_json = json.dumps(adjusted_points)
+                    
+                    # Default white color (RGBA in 0-1 range)
+                    r, g, b, a = 1.0, 1.0, 1.0, 1.0
+                    
+                    # Default black frame color
+                    fr, fg, fb, fa = 0.0, 0.0, 0.0, 1.0
+                    
+                    # Empty group ID
+                    group_id = ''
+                    
+                    # Write row
+                    writer.writerow([i, coords_json, r, g, b, a, fr, fg, fb, fa, group_id])
+            
+            QMessageBox.information(
+                self, 
+                "Success", 
+                f"Saved {len(self.canvas.polygons)} polygons to {filename}"
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save array: {str(e)}")
+    
+    def load_array(self):
+        """Load polygons from CSV file compatible with mosaic_editor_pyqt"""
+        # Open file dialog to choose file
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load Array from CSV",
+            "",
+            "CSV Files (*.csv);;All Files (*)"
+        )
+        
+        if not filename:
+            return  # User cancelled
+        
+        # Ask for scale factor
+        from PyQt5.QtWidgets import QInputDialog
+        scale_text, ok = QInputDialog.getText(
+            self,
+            "Scale Factor",
+            "Enter scale percentage (default 100%):",
+            text="100"
+        )
+        
+        if not ok:
+            return  # User cancelled
+        
+        try:
+            scale_factor = float(scale_text) / 100.0  # Convert percentage to decimal
+            scale_factor = max(0.01, min(1000.0, scale_factor))  # Clamp between 1% and 1000%
+        except ValueError:
+            scale_factor = 1.0  # Default to 100% if invalid input
+        
+        try:
+            import csv
+            import json
+            polygons = []
+            
+            with open(filename, 'r', newline='', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile)
+                for row_num, row in enumerate(reader, 1):
+                    try:
+                        # Check if this is the image parameters row
+                        coords_str = row['coordinates'] if 'coordinates' in row else row.get('polygon_coords', '')
+                        
+                        # Skip rows with empty coordinates or special parameter rows
+                        if not coords_str or coords_str.strip() == '' or coords_str in ['IMAGE_PARAMS', 'GRID_PARAMS']:
+                            continue
+                        
+                        # Parse coordinates - handle JSON array format
+                        coords_str = coords_str.strip('"\'')
+                        
+                        try:
+                            coord_list = json.loads(coords_str)
+                            # Apply scale factor
+                            points = []
+                            for point in coord_list:
+                                scaled_x = float(point[0]) * scale_factor
+                                scaled_y = float(point[1]) * scale_factor
+                                points.append((scaled_x, scaled_y))
+                        except:
+                            # Fallback to ast parsing for backward compatibility
+                            import ast
+                            coord_list = ast.literal_eval(coords_str)
+                            points = []
+                            for point in coord_list:
+                                scaled_x = float(point[0]) * scale_factor
+                                scaled_y = float(point[1]) * scale_factor
+                                points.append((scaled_x, scaled_y))
+                        
+                        if len(points) < 3:
+                            continue
+                        
+                        polygons.append(points)
+                        
+                    except Exception as e:
+                        print(f"Error parsing row {row_num}: {e}")
+                        continue
+            
+            if polygons:
+                # Clear existing polygons and load new ones
+                self.canvas.polygons = polygons
+                # Also clear polygon effects and reset selection
+                self.canvas.polygon_effects = [{
+                    'brightness': 0,
+                    'contrast': 1.0,
+                    'saturation': 1.0,
+                    'warmth': 0,
+                    'tint_color': (255, 255, 255),
+                    'tint_strength': 0,
+                    'black_point': 0
+                } for _ in polygons]
+                self.canvas.selected_polygon_index = None
+                self.canvas.dragging_point_index = None
+                self.canvas.selection_changed.emit(-1)
+                self.canvas.apply_effects()
+                self.canvas.update()
+                
+                QMessageBox.information(
+                    self, 
+                    "Success", 
+                    f"Loaded {len(polygons)} polygons from {filename} with {scale_factor*100:.1f}% scale"
+                )
+            else:
+                QMessageBox.warning(self, "Warning", "No valid polygons found in the file.")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load array: {str(e)}")
 
     def save_project(self):
         if self.canvas.cv_image is None:
@@ -762,7 +1060,9 @@ class MainWindow(QMainWindow):
                 'polygons': self.canvas.polygons,
                 'effects': self.canvas.polygon_effects,
                 'width': self.canvas.target_width,
-                'height': self.canvas.target_height
+                'height': self.canvas.target_height,
+                'image_tilt': self.canvas.image_tilt,
+                'vertical_tilt': self.canvas.vertical_tilt
             }
             try:
                 with open(path, 'wb') as f:
@@ -783,10 +1083,14 @@ class MainWindow(QMainWindow):
                 self.canvas.polygon_effects = data['effects']
                 self.canvas.target_width = data.get('width', 300)
                 self.canvas.target_height = data.get('height', 300)
+                self.canvas.image_tilt = data.get('image_tilt', 0)
+                self.canvas.vertical_tilt = data.get('vertical_tilt', 0)
                 
                 # Update UI controls
                 self.width_spin.setValue(self.canvas.target_width)
                 self.height_spin.setValue(self.canvas.target_height)
+                self.image_tilt_slider.setValue(self.canvas.image_tilt)
+                self.vertical_tilt_slider.setValue(self.canvas.vertical_tilt)
                 
                 # Reset state
                 self.canvas.display_image = self.canvas.cv_image.copy()
