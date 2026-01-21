@@ -588,6 +588,8 @@ class ControlPanel(QWidget):
     def __init__(self, canvas=None):
         super().__init__()
         self.canvas = canvas
+        self.frame_margin_percent = 10.0  # Default 10%
+        self.offset_line_percent = 5.0    # Default 5%
         self.init_ui()
     
     def init_ui(self):
@@ -622,6 +624,26 @@ class ControlPanel(QWidget):
         self.grid_size_input.setPlaceholderText('Enter box size (e.g.,300)')
         self.grid_size_input.textChanged.connect(self.on_grid_size_changed)
         layout.addWidget(self.grid_size_input)
+        
+        # Frame margin percentage input
+        frame_margin_label = QLabel('Frame Margin %:')
+        layout.addWidget(frame_margin_label)
+        
+        self.frame_margin_input = QLineEdit()
+        self.frame_margin_input.setText('10')
+        self.frame_margin_input.setPlaceholderText('Enter margin % (e.g., 10)')
+        self.frame_margin_input.textChanged.connect(self.on_frame_margin_changed)
+        layout.addWidget(self.frame_margin_input)
+        
+        # Offset line percentage input
+        offset_line_label = QLabel('Offset Line %:')
+        layout.addWidget(offset_line_label)
+        
+        self.offset_line_input = QLineEdit()
+        self.offset_line_input.setText('5')
+        self.offset_line_input.setPlaceholderText('Enter offset % (e.g., 5)')
+        self.offset_line_input.textChanged.connect(self.on_offset_line_changed)
+        layout.addWidget(self.offset_line_input)
         
         # Cut button
         self.cut_btn = QPushButton("Cut")
@@ -687,6 +709,26 @@ class ControlPanel(QWidget):
             if self.canvas:
                 self.canvas.grid_size = grid_size
                 self.canvas.update()
+        except ValueError:
+            # Invalid input, ignore
+            pass
+    
+    def on_frame_margin_changed(self):
+        """Handle frame margin percentage changes"""
+        try:
+            margin_percent = float(self.frame_margin_input.text()) if self.frame_margin_input.text() else 10.0
+            margin_percent = max(0, min(margin_percent, 100))  # Clamp between 0 and 100
+            self.frame_margin_percent = margin_percent
+        except ValueError:
+            # Invalid input, ignore
+            pass
+    
+    def on_offset_line_changed(self):
+        """Handle offset line percentage changes"""
+        try:
+            offset_percent = float(self.offset_line_input.text()) if self.offset_line_input.text() else 5.0
+            offset_percent = max(0, min(offset_percent, 100))  # Clamp between 0 and 100
+            self.offset_line_percent = offset_percent
         except ValueError:
             # Invalid input, ignore
             pass
@@ -1429,8 +1471,8 @@ class ControlPanel(QWidget):
                 box_max_x = box_min_x + cell_size_world
                 box_max_y = box_min_y + cell_size_world
                 
-                # Add 20 pixels margin on each side for the frame
-                frame_margin = 20
+                # Use frame margin percentage from control panel
+                frame_margin = cell_size_world * (self.frame_margin_percent / 100.0)
                 frame_min_x = box_min_x - frame_margin
                 frame_min_y = box_min_y - frame_margin
                 frame_max_x = box_max_x + frame_margin
@@ -1471,6 +1513,45 @@ class ControlPanel(QWidget):
                     (frame_min_x, frame_min_y)  # Close the rectangle
                 ]
                 msp.add_lwpolyline(frame_points, dxfattribs={'color': 8})  # Dark gray frame
+            
+            # Add 5% offset boundary for tile DXF or box DXF
+            if len(polygons_data) > 0:
+                # Calculate offset distance based on cell size using offset line percentage
+                offset_distance = cell_size_world * (self.offset_line_percent / 100.0) if box_index is not None else 10
+                
+                try:
+                    # Collect all polygons
+                    all_polygons = []
+                    for poly_data in polygons_data:
+                        polygon = poly_data['polygon']
+                        if hasattr(polygon, 'exterior'):
+                            all_polygons.append(polygon)
+                        elif hasattr(polygon, 'geoms'):
+                            all_polygons.extend(polygon.geoms)
+                    
+                    # Union all polygons into one shape
+                    if len(all_polygons) > 0:
+                        unified_polygon = unary_union(all_polygons)
+                        
+                        # Create buffered (offset) polygon
+                        buffered_polygon = unified_polygon.buffer(offset_distance, join_style=2)  # join_style=2 for mitered joins
+                        
+                        # Add the offset boundary as a blue line
+                        if hasattr(buffered_polygon, 'exterior'):
+                            offset_coords = list(buffered_polygon.exterior.coords)
+                            if len(offset_coords) > 1 and offset_coords[0] == offset_coords[-1]:
+                                offset_coords = offset_coords[:-1]
+                            msp.add_lwpolyline(offset_coords, close=True, dxfattribs={'color': 5})  # Blue color
+                        elif hasattr(buffered_polygon, 'geoms'):
+                            # Handle MultiPolygon result
+                            for geom in buffered_polygon.geoms:
+                                if hasattr(geom, 'exterior'):
+                                    offset_coords = list(geom.exterior.coords)
+                                    if len(offset_coords) > 1 and offset_coords[0] == offset_coords[-1]:
+                                        offset_coords = offset_coords[:-1]
+                                    msp.add_lwpolyline(offset_coords, close=True, dxfattribs={'color': 5})
+                except Exception as e:
+                    print(f"Warning: Could not create offset boundary: {e}")
             
             # Add each polygon to the DXF
             for poly_id, poly_data in enumerate(polygons_data):
@@ -1579,6 +1660,57 @@ class ControlPanel(QWidget):
                     f.write(f"10\n{x:.6f}\n20\n{y:.6f}\n")
                 handle_counter += 1
             
+            # Add 5% offset boundary for tile DXF or box DXF
+            if len(polygons_data) > 0:
+                # Calculate offset distance using offset line percentage
+                if box_index is not None:
+                    cell_size_world = self.canvas.grid_size
+                    offset_distance = cell_size_world * (self.offset_line_percent / 100.0)
+                else:
+                    offset_distance = 10
+                
+                try:
+                    # Collect all polygons
+                    all_polygons = []
+                    for poly_data in polygons_data:
+                        polygon = poly_data['polygon']
+                        if hasattr(polygon, 'exterior'):
+                            all_polygons.append(polygon)
+                        elif hasattr(polygon, 'geoms'):
+                            all_polygons.extend(polygon.geoms)
+                    
+                    # Union all polygons into one shape
+                    if len(all_polygons) > 0:
+                        unified_polygon = unary_union(all_polygons)
+                        
+                        # Create buffered (offset) polygon
+                        buffered_polygon = unified_polygon.buffer(offset_distance, join_style=2)
+                        
+                        # Handle both Polygon and MultiPolygon results
+                        polygons_to_draw = []
+                        if hasattr(buffered_polygon, 'exterior'):
+                            polygons_to_draw.append(buffered_polygon)
+                        elif hasattr(buffered_polygon, 'geoms'):
+                            polygons_to_draw.extend(buffered_polygon.geoms)
+                        
+                        for geom in polygons_to_draw:
+                            if hasattr(geom, 'exterior'):
+                                offset_coords = list(geom.exterior.coords)
+                                if len(offset_coords) > 1 and offset_coords[0] == offset_coords[-1]:
+                                    offset_coords = offset_coords[:-1]
+                                
+                                if len(offset_coords) >= 3:
+                                    f.write(f"0\nLWPOLYLINE\n5\n{handle_counter:X}\n330\n1F\n")
+                                    f.write("100\nAcDbEntity\n8\n0\n62\n5\n")  # Color 5 = blue
+                                    f.write("100\nAcDbPolyline\n")
+                                    f.write(f"90\n{len(offset_coords)}\n70\n1\n")
+                                    
+                                    for x, y in offset_coords:
+                                        f.write(f"10\n{x:.6f}\n20\n{y:.6f}\n")
+                                    handle_counter += 1
+                except Exception as e:
+                    print(f"Warning: Could not create offset boundary: {e}")
+            
             # Add polygons with proper LWPOLYLINE structure
             for poly_data in polygons_data:
                 polygon = poly_data['polygon']
@@ -1642,7 +1774,7 @@ class ControlPanel(QWidget):
             box_max_x = box_min_x + cell_size_world
             box_max_y = box_min_y + cell_size_world
             
-            frame_margin = 20
+            frame_margin = cell_size_world * (self.frame_margin_percent / 100.0)
             return [
                 (box_min_x - frame_margin, box_min_y - frame_margin),
                 (box_max_x + frame_margin, box_min_y - frame_margin),
@@ -1661,7 +1793,9 @@ class ControlPanel(QWidget):
                 max_x = max(max_x, bounds[2])
                 max_y = max(max_y, bounds[3])
             
-            frame_margin = 20
+            # Calculate margin as 10% of average dimension
+            avg_dimension = ((max_x - min_x) + (max_y - min_y)) / 2
+            frame_margin = avg_dimension * 0.1
             return [
                 (min_x - frame_margin, min_y - frame_margin),
                 (max_x + frame_margin, min_y - frame_margin),

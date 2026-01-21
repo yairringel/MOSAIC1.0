@@ -6,8 +6,8 @@ import pickle
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QFileDialog, QMessageBox, QScrollArea, QSpinBox,
                              QSlider, QGroupBox, QFormLayout, QColorDialog)
-from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor
-from PyQt5.QtCore import Qt, QPoint, QPointF, QEvent, pyqtSignal
+from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont
+from PyQt5.QtCore import Qt, QPoint, QPointF, QEvent, pyqtSignal, QRectF
 
 class ImageCanvas(QWidget):
     selection_changed = pyqtSignal(int) # Emits index of selected polygon, or -1
@@ -33,6 +33,8 @@ class ImageCanvas(QWidget):
         self.vertical_tilt = 0  # Tilt angle for vertical middle axis
         self.stretch_drag_start = None  # Starting point for stretch rectangle drag
         self.stretch_drag_current = None  # Current point during stretch rectangle drag
+        self.show_grid = False  # Whether to display grid
+        self.grid_size = 50  # Grid cell size in pixels
         self.setFocusPolicy(Qt.StrongFocus)
         self.setMinimumSize(400, 400)
 
@@ -69,8 +71,10 @@ class ImageCanvas(QWidget):
         bytes_per_line = 3 * width;
         # Create QImage from numpy array
         self.image = QImage(self.display_image.data, width, height, bytes_per_line, QImage.Format_RGB888)
-        # Resize widget to match image size with scale
-        self.setFixedSize(int(width * self.scale_factor), int(height * self.scale_factor))
+        # Resize widget to match image size with scale, adding extra space for grid labels
+        label_margin = 30  # Extra space for labels
+        self.setFixedSize(int((width + label_margin) * self.scale_factor), 
+                         int((height + label_margin) * self.scale_factor))
         self.update()
 
     def apply_effects(self):
@@ -517,12 +521,71 @@ class ImageCanvas(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        
+        # Define offset for grid labels
+        label_offset = 30
+        
         if self.image:
-            # Draw image scaled
-            target_rect = self.rect()
+            # Draw image with offset to make room for labels
+            img_width = self.image.width()
+            img_height = self.image.height()
+            target_rect = QRectF(label_offset * self.scale_factor, 
+                                label_offset * self.scale_factor,
+                                img_width * self.scale_factor, 
+                                img_height * self.scale_factor)
             painter.drawImage(target_rect, self.image)
         
+        # Translate and scale for drawing overlays
+        painter.translate(label_offset * self.scale_factor, label_offset * self.scale_factor)
         painter.scale(self.scale_factor, self.scale_factor)
+        
+        # Draw grid if enabled
+        if self.show_grid and self.image and self.grid_size > 0:
+            painter.setPen(QPen(QColor(173, 216, 230), 2))  # Light blue, 2 pixels wide
+            
+            # Get image dimensions
+            img_width = self.image.width()
+            img_height = self.image.height()
+            
+            # Calculate number of grid cells
+            num_cols = int(img_width / self.grid_size)
+            num_rows = int(img_height / self.grid_size)
+            
+            # Draw vertical lines
+            x = self.grid_size
+            while x < img_width:
+                painter.drawLine(QPointF(x, 0), QPointF(x, img_height))
+                x += self.grid_size
+            
+            # Draw horizontal lines
+            y = self.grid_size
+            while y < img_height:
+                painter.drawLine(QPointF(0, y), QPointF(img_width, y))
+                y += self.grid_size
+            
+            # Draw grid labels
+            painter.setPen(QPen(QColor(0, 0, 255), 1))  # Blue text
+            font = QFont()
+            font.setPixelSize(max(14, int(self.grid_size / 6)))  # Scale font with grid size
+            painter.setFont(font)
+            
+            # Calculate font metrics for better positioning
+            font_height = painter.fontMetrics().height()
+            
+            # Draw column numbers at the top (above the image)
+            for col in range(num_cols):
+                column_center_x = (col + 0.5) * self.grid_size
+                number_y = -5  # Position just above the grid
+                text = str(col + 1)
+                text_width = painter.fontMetrics().horizontalAdvance(text)
+                painter.drawText(int(column_center_x - text_width / 2), int(number_y), text)
+            
+            # Draw row letters on the left (left of the image)
+            for row in range(num_rows):
+                row_center_y = (row + 0.5) * self.grid_size
+                letter_x = -15  # Position to the left of the grid
+                text = chr(ord('A') + row)
+                painter.drawText(int(letter_x), int(row_center_y + font_height / 3), text)
 
         # Draw completed polygons
         if self.polygons:
@@ -566,7 +629,6 @@ class ImageCanvas(QWidget):
             
             # Draw rectangle
             painter.setPen(QPen(Qt.yellow, 2))
-            from PyQt5.QtCore import QRectF
             painter.drawRect(QRectF(min(x1, x2), min(y1, y2), abs(x2 - x1), abs(y2 - y1)))
             
             # Draw corner points
@@ -752,10 +814,40 @@ class MainWindow(QMainWindow):
         sidebar_layout.addWidget(self.effects_group)
         
         sidebar_layout.addStretch() # Push items to top
+        
+        # Right sidebar container
+        right_sidebar_widget = QWidget()
+        right_sidebar_widget.setFixedWidth(250)
+        right_sidebar_layout = QVBoxLayout(right_sidebar_widget)
+        right_sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Grid controls
+        right_sidebar_layout.addWidget(QLabel("<b>Grid Controls</b>"))
+        right_sidebar_layout.addSpacing(10)
+        
+        self.grid_btn = QPushButton("Grid")
+        self.grid_btn.setCheckable(True)
+        self.grid_btn.clicked.connect(self.toggle_grid)
+        self.grid_btn.setToolTip("Toggle grid display")
+        right_sidebar_layout.addWidget(self.grid_btn)
+        
+        right_sidebar_layout.addSpacing(10)
+        right_sidebar_layout.addWidget(QLabel("Grid Size:"))
+        
+        self.grid_size_spin = QSpinBox()
+        self.grid_size_spin.setRange(10, 10000)
+        self.grid_size_spin.setValue(50)
+        self.grid_size_spin.setSuffix(" px")
+        self.grid_size_spin.setToolTip("Grid cell size in pixels")
+        self.grid_size_spin.valueChanged.connect(self.update_grid_size)
+        right_sidebar_layout.addWidget(self.grid_size_spin)
+        
+        right_sidebar_layout.addStretch()
 
-        # Add sidebar and scroll area to main layout
+        # Add sidebar, scroll area, and right sidebar to main layout
         main_layout.addWidget(sidebar_widget)
         main_layout.addWidget(self.scroll_area)
+        main_layout.addWidget(right_sidebar_widget)
         
         container = QWidget()
         container.setLayout(main_layout)
@@ -868,6 +960,14 @@ class MainWindow(QMainWindow):
                 self.polygon_btn.setChecked(False)
         else:
             self.canvas.stop_polygon_drawing()
+    
+    def toggle_grid(self):
+        self.canvas.show_grid = self.grid_btn.isChecked()
+        self.canvas.update()
+    
+    def update_grid_size(self):
+        self.canvas.grid_size = self.grid_size_spin.value()
+        self.canvas.update()
 
     def update_resolution(self):
         self.canvas.set_target_resolution(self.width_spin.value(), self.height_spin.value())
