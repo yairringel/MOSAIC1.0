@@ -34,7 +34,7 @@ class ImageCanvas(QWidget):
         self.stretch_drag_start = None  # Starting point for stretch rectangle drag
         self.stretch_drag_current = None  # Current point during stretch rectangle drag
         self.show_grid = False  # Whether to display grid
-        self.grid_size = 50  # Grid cell size in pixels
+        self.grid_size_percent = 10  # Grid cell size as percentage of image size
         self.setFocusPolicy(Qt.StrongFocus)
         self.setMinimumSize(400, 400)
 
@@ -252,9 +252,11 @@ class ImageCanvas(QWidget):
     def mousePressEvent(self, event):
         if self.image:
             pos = event.pos()
+            # Account for label offset (30 pixels for grid labels)
+            label_offset = 30
             # Convert to image coordinates
-            img_x = pos.x() / self.scale_factor
-            img_y = pos.y() / self.scale_factor
+            img_x = (pos.x() - label_offset * self.scale_factor) / self.scale_factor
+            img_y = (pos.y() - label_offset * self.scale_factor) / self.scale_factor
             
             # Ensure point is within image bounds (allow slightly outside for editing handles)
             if 0 <= img_x < self.image.width() and 0 <= img_y < self.image.height() or (not self.selecting_mode and not self.drawing_polygon):
@@ -342,8 +344,9 @@ class ImageCanvas(QWidget):
         if self.selecting_mode and self.stretch_drag_start is not None:
             # Update current drag position for stretch rectangle
             pos = event.pos()
-            img_x = pos.x() / self.scale_factor
-            img_y = pos.y() / self.scale_factor
+            label_offset = 30
+            img_x = (pos.x() - label_offset * self.scale_factor) / self.scale_factor
+            img_y = (pos.y() - label_offset * self.scale_factor) / self.scale_factor
             
             # Constrain to square
             start_x, start_y = self.stretch_drag_start
@@ -360,8 +363,9 @@ class ImageCanvas(QWidget):
             self.update()
         elif self.dragging_point_index is not None and self.selected_polygon_index is not None:
              pos = event.pos()
-             img_x = pos.x() / self.scale_factor
-             img_y = pos.y() / self.scale_factor
+             label_offset = 30
+             img_x = (pos.x() - label_offset * self.scale_factor) / self.scale_factor
+             img_y = (pos.y() - label_offset * self.scale_factor) / self.scale_factor
              
              # Update point
              self.polygons[self.selected_polygon_index][self.dragging_point_index] = (img_x, img_y)
@@ -540,33 +544,37 @@ class ImageCanvas(QWidget):
         painter.scale(self.scale_factor, self.scale_factor)
         
         # Draw grid if enabled
-        if self.show_grid and self.image and self.grid_size > 0:
+        if self.show_grid and self.image and self.grid_size_percent > 0:
             painter.setPen(QPen(QColor(173, 216, 230), 2))  # Light blue, 2 pixels wide
             
             # Get image dimensions
             img_width = self.image.width()
             img_height = self.image.height()
             
+            # Calculate grid cell size from percentage (use smaller dimension for square cells)
+            smaller_dimension = min(img_width, img_height)
+            grid_cell_size = smaller_dimension * (self.grid_size_percent / 100.0)
+            
             # Calculate number of grid cells
-            num_cols = int(img_width / self.grid_size)
-            num_rows = int(img_height / self.grid_size)
+            num_cols = int(img_width / grid_cell_size)
+            num_rows = int(img_height / grid_cell_size)
             
             # Draw vertical lines
-            x = self.grid_size
+            x = grid_cell_size
             while x < img_width:
                 painter.drawLine(QPointF(x, 0), QPointF(x, img_height))
-                x += self.grid_size
+                x += grid_cell_size
             
             # Draw horizontal lines
-            y = self.grid_size
+            y = grid_cell_size
             while y < img_height:
                 painter.drawLine(QPointF(0, y), QPointF(img_width, y))
-                y += self.grid_size
+                y += grid_cell_size
             
             # Draw grid labels
             painter.setPen(QPen(QColor(0, 0, 255), 1))  # Blue text
             font = QFont()
-            font.setPixelSize(max(14, int(self.grid_size / 6)))  # Scale font with grid size
+            font.setPixelSize(max(14, int(grid_cell_size / 6)))  # Scale font with grid size
             painter.setFont(font)
             
             # Calculate font metrics for better positioning
@@ -574,7 +582,7 @@ class ImageCanvas(QWidget):
             
             # Draw column numbers at the top (above the image)
             for col in range(num_cols):
-                column_center_x = (col + 0.5) * self.grid_size
+                column_center_x = (col + 0.5) * grid_cell_size
                 number_y = -5  # Position just above the grid
                 text = str(col + 1)
                 text_width = painter.fontMetrics().horizontalAdvance(text)
@@ -582,7 +590,7 @@ class ImageCanvas(QWidget):
             
             # Draw row letters on the left (left of the image)
             for row in range(num_rows):
-                row_center_y = (row + 0.5) * self.grid_size
+                row_center_y = (row + 0.5) * grid_cell_size
                 letter_x = -15  # Position to the left of the grid
                 text = chr(ord('A') + row)
                 painter.drawText(int(letter_x), int(row_center_y + font_height / 3), text)
@@ -835,12 +843,39 @@ class MainWindow(QMainWindow):
         right_sidebar_layout.addWidget(QLabel("Grid Size:"))
         
         self.grid_size_spin = QSpinBox()
-        self.grid_size_spin.setRange(10, 10000)
-        self.grid_size_spin.setValue(50)
-        self.grid_size_spin.setSuffix(" px")
-        self.grid_size_spin.setToolTip("Grid cell size in pixels")
+        self.grid_size_spin.setRange(1, 100)
+        self.grid_size_spin.setValue(10)
+        self.grid_size_spin.setSuffix(" %")
+        self.grid_size_spin.setToolTip("Grid cell size as percentage of image size")
         self.grid_size_spin.valueChanged.connect(self.update_grid_size)
         right_sidebar_layout.addWidget(self.grid_size_spin)
+        
+        right_sidebar_layout.addSpacing(20)
+        right_sidebar_layout.addWidget(QLabel("<b>Tile Export Settings</b>"))
+        right_sidebar_layout.addSpacing(10)
+        
+        right_sidebar_layout.addWidget(QLabel("DPI:"))
+        self.dpi_spin = QSpinBox()
+        self.dpi_spin.setRange(72, 1200)
+        self.dpi_spin.setValue(300)
+        self.dpi_spin.setToolTip("Resolution in dots per inch")
+        right_sidebar_layout.addWidget(self.dpi_spin)
+        
+        right_sidebar_layout.addSpacing(10)
+        right_sidebar_layout.addWidget(QLabel("Tile Size:"))
+        self.tile_size_spin = QSpinBox()
+        self.tile_size_spin.setRange(10, 5000)
+        self.tile_size_spin.setValue(200)
+        self.tile_size_spin.setSuffix(" mm")
+        self.tile_size_spin.setToolTip("Tile size in millimeters")
+        right_sidebar_layout.addWidget(self.tile_size_spin)
+        
+        right_sidebar_layout.addSpacing(20)
+        
+        self.save_tile_btn = QPushButton("Save Tile Image")
+        self.save_tile_btn.clicked.connect(self.save_tile_image)
+        self.save_tile_btn.setToolTip("Save C3 tile as JPEG")
+        right_sidebar_layout.addWidget(self.save_tile_btn)
         
         right_sidebar_layout.addStretch()
 
@@ -966,8 +1001,71 @@ class MainWindow(QMainWindow):
         self.canvas.update()
     
     def update_grid_size(self):
-        self.canvas.grid_size = self.grid_size_spin.value()
+        self.canvas.grid_size_percent = self.grid_size_spin.value()
         self.canvas.update()
+    
+    def save_tile_image(self):
+        """Save the C3 tile (row C, column 3) as a JPEG file"""
+        if self.canvas.cv_image is None:
+            QMessageBox.warning(self, "Warning", "No image loaded. Please load an image first.")
+            return
+        
+        # Get image dimensions
+        img_height, img_width = self.canvas.cv_image.shape[:2]
+        
+        # Calculate grid cell size from percentage
+        smaller_dimension = min(img_width, img_height)
+        grid_cell_size = int(smaller_dimension * (self.canvas.grid_size_percent / 100.0))
+        
+        if grid_cell_size == 0:
+            QMessageBox.warning(self, "Warning", "Grid size is too small. Please increase grid size percentage.")
+            return
+        
+        # C3 means row C (index 2) and column 3 (index 2, since columns are 1-indexed)
+        row_index = 2  # C is the 3rd row (0-indexed)
+        col_index = 2  # Column 3 is the 3rd column (0-indexed)
+        
+        # Calculate tile boundaries
+        x_start = col_index * grid_cell_size
+        y_start = row_index * grid_cell_size
+        x_end = min(x_start + grid_cell_size, img_width)
+        y_end = min(y_start + grid_cell_size, img_height)
+        
+        # Check if C3 exists within image bounds
+        if x_start >= img_width or y_start >= img_height:
+            QMessageBox.warning(self, "Warning", "C3 tile is outside image bounds. Please reduce grid size or check image.")
+            return
+        
+        # Extract tile from image
+        tile_image = self.canvas.cv_image[y_start:y_end, x_start:x_end]
+        
+        # Calculate target resolution based on tile size and DPI
+        tile_size_mm = self.tile_size_spin.value()
+        dpi = self.dpi_spin.value()
+        
+        # Convert mm to inches (1 inch = 25.4 mm)
+        tile_size_inches = tile_size_mm / 25.4
+        
+        # Calculate target pixel size
+        target_pixels = int(tile_size_inches * dpi)
+        
+        # Resize tile to target resolution (maintaining aspect ratio by making it square)
+        tile_resized = cv2.resize(tile_image, (target_pixels, target_pixels), interpolation=cv2.INTER_LANCZOS4)
+        
+        # Ask user for save location
+        path, _ = QFileDialog.getSaveFileName(self, "Save C3 Tile Image", "C3_tile.jpg", "JPEG Images (*.jpg *.jpeg)")
+        if path:
+            # Convert RGB to BGR for OpenCV
+            tile_bgr = cv2.cvtColor(tile_resized, cv2.COLOR_RGB2BGR)
+            success = cv2.imwrite(path, tile_bgr, [cv2.IMWRITE_JPEG_QUALITY, 95])
+            if success:
+                QMessageBox.information(self, "Success", 
+                    f"C3 tile saved successfully to:\n{path}\n\n"
+                    f"Resolution: {target_pixels}x{target_pixels} pixels\n"
+                    f"Tile Size: {tile_size_mm} mm\n"
+                    f"DPI: {dpi}")
+            else:
+                QMessageBox.critical(self, "Error", "Failed to save tile image.")
 
     def update_resolution(self):
         self.canvas.set_target_resolution(self.width_spin.value(), self.height_spin.value())
