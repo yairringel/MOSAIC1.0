@@ -80,17 +80,34 @@ class ImageCanvas(QWidget):
         else:
             QMessageBox.critical(self, "Error", "Failed to load image.")
 
+    def _compute_image_pan(self):
+        """Return (pan_x, pan_y) in image pixels: free pan without wrapping."""
+        if not self.show_grid or self.image is None or self.grid_size_percent <= 0:
+            return 0.0, 0.0
+        return float(self.grid_offset_x), float(self.grid_offset_y)
+
+    def update_canvas_size(self):
+        """Resize the widget to fully contain the image at its current pan position."""
+        if self.image is None:
+            return
+        label_margin = 30
+        pan_x, pan_y = self._compute_image_pan()
+        # Extra space is the positive pan amount (if image moved right/down it needs more room)
+        extra_x = max(0.0, pan_x)
+        extra_y = max(0.0, pan_y)
+        self.setFixedSize(
+            int((self.image.width()  + label_margin + extra_x) * self.scale_factor),
+            int((self.image.height() + label_margin + extra_y) * self.scale_factor)
+        )
+
     def update_image_from_cv(self):
         if self.display_image is None:
             return
         height, width, channel = self.display_image.shape
-        bytes_per_line = 3 * width;
+        bytes_per_line = 3 * width
         # Create QImage from numpy array
         self.image = QImage(self.display_image.data, width, height, bytes_per_line, QImage.Format_RGB888)
-        # Resize widget to match image size with scale, adding extra space for grid labels
-        label_margin = 30  # Extra space for labels
-        self.setFixedSize(int((width + label_margin) * self.scale_factor), 
-                         int((height + label_margin) * self.scale_factor))
+        self.update_canvas_size()
         self.update()
 
     def apply_effects(self):
@@ -649,15 +666,23 @@ class ImageCanvas(QWidget):
         
         # Define offset for grid labels
         label_offset = 30
-        
+
+        # Compute how much to pan the image (image moves, grid stays fixed)
+        img_pan_x = 0.0
+        img_pan_y = 0.0
+        if self.show_grid and self.image and self.grid_size_percent > 0:
+            img_pan_x = float(self.grid_offset_x)
+            img_pan_y = float(self.grid_offset_y)
+
         if self.image:
-            # Draw image with offset to make room for labels
+            # Draw image shifted so it pans under the fixed grid
             img_width = self.image.width()
             img_height = self.image.height()
-            target_rect = QRectF(label_offset * self.scale_factor, 
-                                label_offset * self.scale_factor,
-                                img_width * self.scale_factor, 
-                                img_height * self.scale_factor)
+            target_rect = QRectF(
+                (label_offset + img_pan_x) * self.scale_factor,
+                (label_offset + img_pan_y) * self.scale_factor,
+                img_width * self.scale_factor,
+                img_height * self.scale_factor)
             painter.drawImage(target_rect, self.image)
         
         # Translate and scale for drawing overlays
@@ -680,9 +705,9 @@ class ImageCanvas(QWidget):
             num_cols = int(img_width / grid_cell_size)
             num_rows = int(img_height / grid_cell_size)
             
-            # Compute offsets (keep within one cell via modulo)
-            start_x = self.grid_offset_x % grid_cell_size
-            start_y = self.grid_offset_y % grid_cell_size
+            # Grid is fixed — always starts at 0 (image pans underneath)
+            start_x = 0.0
+            start_y = 0.0
 
             # Draw vertical lines
             x = start_x
@@ -705,8 +730,8 @@ class ImageCanvas(QWidget):
             # Calculate font metrics for better positioning
             font_height = painter.fontMetrics().height()
             
-            # Draw column numbers at the top (above the image)
-            x = start_x
+            # Draw column numbers at the top (fixed — always 1, 2, 3 ...)
+            x = 0.0
             col_num = 1
             while x < img_width:
                 center_x = x + grid_cell_size / 2
@@ -716,9 +741,9 @@ class ImageCanvas(QWidget):
                     painter.drawText(int(center_x - text_width / 2), int(-5), text)
                 x += grid_cell_size
                 col_num += 1
-            
-            # Draw row letters on the left (left of the image)
-            y = start_y
+
+            # Draw row letters on the left (fixed — always A, B, C ...)
+            y = 0.0
             row_num = 0
             while y < img_height:
                 center_y = y + grid_cell_size / 2
@@ -1218,21 +1243,25 @@ class MainWindow(QMainWindow):
     
     def toggle_grid(self):
         self.canvas.show_grid = self.grid_btn.isChecked()
+        self.canvas.update_canvas_size()
         self.canvas.update()
-    
+
     def update_grid_size(self):
         self.canvas.grid_size_percent = self.grid_size_spin.value()
+        self.canvas.update_canvas_size()
         self.canvas.update()
 
     def move_grid(self, dx, dy):
         step = self.grid_step_spin.value()
         self.canvas.grid_offset_x += dx * step
         self.canvas.grid_offset_y += dy * step
+        self.canvas.update_canvas_size()
         self.canvas.update()
 
     def reset_grid_offset(self):
         self.canvas.grid_offset_x = 0
         self.canvas.grid_offset_y = 0
+        self.canvas.update_canvas_size()
         self.canvas.update()
     
     def save_tile_image(self):
@@ -1355,9 +1384,10 @@ class MainWindow(QMainWindow):
         if not filename:
             return  # User cancelled
 
-        # A1 corner in image pixels (matches the grid's start_x / start_y in paintEvent)
-        origin_x = self.canvas.grid_offset_x % original_cell_px
-        origin_y = self.canvas.grid_offset_y % original_cell_px
+        # A1 corner in image pixels: image is panned right/down by (offset % cell),
+        # so A1's top-left is at image pixel -(offset % cell).
+        origin_x = -(self.canvas.grid_offset_x % original_cell_px)
+        origin_y = -(self.canvas.grid_offset_y % original_cell_px)
 
         try:
             import csv
