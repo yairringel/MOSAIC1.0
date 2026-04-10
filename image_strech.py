@@ -31,6 +31,7 @@ class ImageCanvas(QWidget):
         self.dragging_point_index = None
         self.image_tilt = 0  # Tilt angle for the entire image (horizontal)
         self.vertical_tilt = 0  # Tilt angle for vertical middle axis
+        self.global_sharpness = 0  # Sharpness applied to entire image
         self.stretch_drag_start = None  # Starting point for stretch rectangle drag
         self.stretch_drag_current = None  # Current point during stretch rectangle drag
         self.show_grid = False  # Whether to display grid
@@ -82,22 +83,16 @@ class ImageCanvas(QWidget):
 
     def _compute_image_pan(self):
         """Return (pan_x, pan_y) in image pixels: free pan without wrapping."""
-        if not self.show_grid or self.image is None or self.grid_size_percent <= 0:
-            return 0.0, 0.0
         return float(self.grid_offset_x), float(self.grid_offset_y)
 
     def update_canvas_size(self):
-        """Resize the widget to fully contain the image at its current pan position."""
+        """Resize the widget to fit the image. Pan does not change the widget size."""
         if self.image is None:
             return
         label_margin = 30
-        pan_x, pan_y = self._compute_image_pan()
-        # Extra space is the positive pan amount (if image moved right/down it needs more room)
-        extra_x = max(0.0, pan_x)
-        extra_y = max(0.0, pan_y)
         self.setFixedSize(
-            int((self.image.width()  + label_margin + extra_x) * self.scale_factor),
-            int((self.image.height() + label_margin + extra_y) * self.scale_factor)
+            int((self.image.width()  + label_margin) * self.scale_factor),
+            int((self.image.height() + label_margin) * self.scale_factor)
         )
 
     def update_image_from_cv(self):
@@ -254,6 +249,12 @@ class ImageCanvas(QWidget):
                 current_roi = self.display_image[y:y+h, x:x+w]
                 np.copyto(current_roi, roi, where=roi_mask_3.astype(bool))
 
+        # Apply global sharpness to the entire image
+        if self.global_sharpness > 0:
+            blurred = cv2.GaussianBlur(self.display_image, (0, 0), sigmaX=3)
+            strength = self.global_sharpness / 50.0  # 0.0 to 2.0
+            self.display_image = cv2.addWeighted(self.display_image, 1.0 + strength, blurred, -strength, 0)
+
         self.update_image_from_cv()
 
     def start_stretch_selection(self):
@@ -346,7 +347,8 @@ class ImageCanvas(QWidget):
                                 'warmth': 0,
                                 'tint_color': (255, 255, 255),
                                 'tint_strength': 0,
-                                'black_point': 0
+                                'black_point': 0,
+                                'sharpness': 0
                             })
                             self.current_polygon = []
                             # self.drawing_polygon = False # Keep drawing mode active
@@ -668,11 +670,8 @@ class ImageCanvas(QWidget):
         label_offset = 30
 
         # Compute how much to pan the image (image moves, grid stays fixed)
-        img_pan_x = 0.0
-        img_pan_y = 0.0
-        if self.show_grid and self.image and self.grid_size_percent > 0:
-            img_pan_x = float(self.grid_offset_x)
-            img_pan_y = float(self.grid_offset_y)
+        img_pan_x = float(self.grid_offset_x)
+        img_pan_y = float(self.grid_offset_y)
 
         if self.image:
             # Draw image shifted so it pans under the fixed grid
@@ -701,23 +700,16 @@ class ImageCanvas(QWidget):
             smaller_dimension = min(img_width, img_height)
             grid_cell_size = smaller_dimension * (self.grid_size_percent / 100.0)
             
-            # Calculate number of grid cells
-            num_cols = int(img_width / grid_cell_size)
-            num_rows = int(img_height / grid_cell_size)
-            
-            # Grid is fixed — always starts at 0 (image pans underneath)
-            start_x = 0.0
-            start_y = 0.0
-
+            # Grid origin is always fixed at (0,0) — image pans underneath
             # Draw vertical lines
-            x = start_x
-            while x < img_width:
+            x = 0.0
+            while x <= img_width:
                 painter.drawLine(QPointF(x, 0), QPointF(x, img_height))
                 x += grid_cell_size
             
             # Draw horizontal lines
-            y = start_y
-            while y < img_height:
+            y = 0.0
+            while y <= img_height:
                 painter.drawLine(QPointF(0, y), QPointF(img_width, y))
                 y += grid_cell_size
             
@@ -730,27 +722,24 @@ class ImageCanvas(QWidget):
             # Calculate font metrics for better positioning
             font_height = painter.fontMetrics().height()
             
-            # Draw column numbers at the top (fixed — always 1, 2, 3 ...)
+            # Draw column numbers at the top
             x = 0.0
             col_num = 1
             while x < img_width:
                 center_x = x + grid_cell_size / 2
-                if 0 <= center_x <= img_width:
-                    text = str(col_num)
-                    text_width = painter.fontMetrics().horizontalAdvance(text)
-                    painter.drawText(int(center_x - text_width / 2), int(-5), text)
+                text = str(col_num)
+                text_width = painter.fontMetrics().horizontalAdvance(text)
+                painter.drawText(int(center_x - text_width / 2), int(-5), text)
                 x += grid_cell_size
                 col_num += 1
 
-            # Draw row letters on the left (fixed — always A, B, C ...)
+            # Draw row letters on the left
             y = 0.0
             row_num = 0
             while y < img_height:
                 center_y = y + grid_cell_size / 2
-                if 0 <= center_y <= img_height:
-                    text = chr(ord('A') + row_num)
-                    letter_x = -15  # Position to the left of the grid
-                    painter.drawText(int(letter_x), int(center_y + font_height / 3), text)
+                text = chr(ord('A') + row_num)
+                painter.drawText(int(-15), int(center_y + font_height / 3), text)
                 y += grid_cell_size
                 row_num += 1
 
@@ -939,6 +928,7 @@ class MainWindow(QMainWindow):
         self.vertical_tilt_slider.valueChanged.connect(self.update_vertical_tilt)
         tilt_layout.addRow("Vertical Tilt", self.vertical_tilt_slider)
         
+        tilt_layout.addRow("Sharpness", self._make_sharpness_slider())
         tilt_group.setLayout(tilt_layout)
         sidebar_layout.addWidget(tilt_group)
         
@@ -973,7 +963,7 @@ class MainWindow(QMainWindow):
         self.black_point_slider.setRange(0, 100)
         self.black_point_slider.setValue(0)
         self.black_point_slider.valueChanged.connect(self.update_effects)
-        
+
         self.tint_btn = QPushButton("Select Tint Color")
         self.tint_btn.clicked.connect(self.select_tint_color)
         self.tint_btn.setStyleSheet("background-color: white; color: black;")
@@ -1036,7 +1026,7 @@ class MainWindow(QMainWindow):
         right_sidebar_layout.addWidget(self.grid_size_spin)
 
         right_sidebar_layout.addSpacing(10)
-        right_sidebar_layout.addWidget(QLabel("Move Grid:"))
+        right_sidebar_layout.addWidget(QLabel("Move Image:"))
 
         grid_arrows_layout = QGridLayout()
         grid_arrows_layout.setSpacing(2)
@@ -1053,7 +1043,7 @@ class MainWindow(QMainWindow):
 
         reset_grid_btn = QPushButton("\u25cb")
         reset_grid_btn.setFixedSize(36, 28)
-        reset_grid_btn.setToolTip("Reset grid offset")
+        reset_grid_btn.setToolTip("Reset image position")
         reset_grid_btn.clicked.connect(self.reset_grid_offset)
         grid_arrows_layout.addWidget(reset_grid_btn, 1, 1)
 
@@ -1201,6 +1191,17 @@ class MainWindow(QMainWindow):
             
             self.canvas.apply_effects()
 
+    def _make_sharpness_slider(self):
+        self.sharpness_slider = QSlider(Qt.Horizontal)
+        self.sharpness_slider.setRange(0, 100)
+        self.sharpness_slider.setValue(0)
+        self.sharpness_slider.valueChanged.connect(self.update_global_sharpness)
+        return self.sharpness_slider
+
+    def update_global_sharpness(self):
+        self.canvas.global_sharpness = self.sharpness_slider.value()
+        self.canvas.apply_effects()
+
     def update_image_tilt(self):
         self.canvas.image_tilt = self.image_tilt_slider.value()
         self.canvas.apply_effects()
@@ -1251,17 +1252,26 @@ class MainWindow(QMainWindow):
         self.canvas.update_canvas_size()
         self.canvas.update()
 
+    def pan_image(self, dx, dy):
+        step = self.grid_step_spin.value()
+        hbar = self.scroll_area.horizontalScrollBar()
+        vbar = self.scroll_area.verticalScrollBar()
+        hbar.setValue(hbar.value() + dx * step)
+        vbar.setValue(vbar.value() + dy * step)
+
+    def reset_pan(self):
+        self.scroll_area.horizontalScrollBar().setValue(0)
+        self.scroll_area.verticalScrollBar().setValue(0)
+
     def move_grid(self, dx, dy):
         step = self.grid_step_spin.value()
         self.canvas.grid_offset_x += dx * step
         self.canvas.grid_offset_y += dy * step
-        self.canvas.update_canvas_size()
         self.canvas.update()
 
     def reset_grid_offset(self):
         self.canvas.grid_offset_x = 0
         self.canvas.grid_offset_y = 0
-        self.canvas.update_canvas_size()
         self.canvas.update()
     
     def save_tile_image(self):
@@ -1285,19 +1295,26 @@ class MainWindow(QMainWindow):
         row_index = 2  # C is the 3rd row (0-indexed)
         col_index = 2  # Column 3 is the 3rd column (0-indexed)
         
-        # Calculate tile boundaries
-        x_start = col_index * grid_cell_size
-        y_start = row_index * grid_cell_size
+        # The grid is fixed; the image pans underneath it by (grid_offset_x, grid_offset_y).
+        # So the image pixel that appears at grid position (col*gs, row*gs) is
+        # (col*gs - grid_offset_x, row*gs - grid_offset_y).
+        x_start = int(col_index * grid_cell_size - self.canvas.grid_offset_x)
+        y_start = int(row_index * grid_cell_size - self.canvas.grid_offset_y)
         x_end = min(x_start + grid_cell_size, img_width)
         y_end = min(y_start + grid_cell_size, img_height)
         
         # Check if C3 exists within image bounds
-        if x_start >= img_width or y_start >= img_height:
+        if x_start >= img_width or y_start >= img_height or x_end <= 0 or y_end <= 0:
             QMessageBox.warning(self, "Warning", "C3 tile is outside image bounds. Please reduce grid size or check image.")
             return
         
-        # Extract tile from image
-        tile_image = self.canvas.cv_image[y_start:y_end, x_start:x_end]
+        # Clamp to valid image bounds
+        x_start = max(0, x_start)
+        y_start = max(0, y_start)
+
+        # Use display_image so effects (tilt etc.) are captured, matching what the user sees
+        source_image = self.canvas.display_image if self.canvas.display_image is not None else self.canvas.cv_image
+        tile_image = source_image[y_start:y_end, x_start:x_end]
         
         # Calculate target resolution based on tile size and DPI
         tile_size_mm = self.tile_size_spin.value()
@@ -1384,10 +1401,10 @@ class MainWindow(QMainWindow):
         if not filename:
             return  # User cancelled
 
-        # A1 corner in image pixels: image is panned right/down by (offset % cell),
-        # so A1's top-left is at image pixel -(offset % cell).
-        origin_x = -(self.canvas.grid_offset_x % original_cell_px)
-        origin_y = -(self.canvas.grid_offset_y % original_cell_px)
+        # Grid origin is fixed at (0,0) in the canvas coordinate system.
+        # Polygon points are already stored in that system, so no shift is needed.
+        origin_x = 0.0
+        origin_y = 0.0
 
         try:
             import csv
@@ -1550,6 +1567,8 @@ class MainWindow(QMainWindow):
                 'grid_offset_x': self.canvas.grid_offset_x,
                 'grid_offset_y': self.canvas.grid_offset_y,
                 'circles': self.canvas.circles,
+                'tile_size_mm': self.tile_size_spin.value(),
+                'dpi': self.dpi_spin.value(),
             }
             try:
                 with open(path, 'wb') as f:
@@ -1585,6 +1604,8 @@ class MainWindow(QMainWindow):
                 self.vertical_tilt_slider.setValue(self.canvas.vertical_tilt)
                 self.grid_btn.setChecked(self.canvas.show_grid)
                 self.grid_size_spin.setValue(self.canvas.grid_size_percent)
+                self.tile_size_spin.setValue(data.get('tile_size_mm', self.tile_size_spin.value()))
+                self.dpi_spin.setValue(data.get('dpi', self.dpi_spin.value()))
                 
                 # Reset state
                 self.canvas.display_image = self.canvas.cv_image.copy()
