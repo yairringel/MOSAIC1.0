@@ -1265,84 +1265,166 @@ class MainWindow(QMainWindow):
 
     def move_grid(self, dx, dy):
         step = self.grid_step_spin.value()
-        self.canvas.grid_offset_x += dx * step
-        self.canvas.grid_offset_y += dy * step
+        delta_x = dx * step
+        delta_y = dy * step
+        self.canvas.grid_offset_x += delta_x
+        self.canvas.grid_offset_y += delta_y
+        for circ in self.canvas.circles:
+            circ[0] += delta_x
+            circ[1] += delta_y
+        self.canvas.polygons = [
+            [(px + delta_x, py + delta_y) for px, py in poly]
+            for poly in self.canvas.polygons
+        ]
         self.canvas.update()
 
     def reset_grid_offset(self):
+        delta_x = -self.canvas.grid_offset_x
+        delta_y = -self.canvas.grid_offset_y
+        for circ in self.canvas.circles:
+            circ[0] += delta_x
+            circ[1] += delta_y
+        self.canvas.polygons = [
+            [(px + delta_x, py + delta_y) for px, py in poly]
+            for poly in self.canvas.polygons
+        ]
         self.canvas.grid_offset_x = 0
         self.canvas.grid_offset_y = 0
         self.canvas.update()
     
     def save_tile_image(self):
-        """Save the C3 tile (row C, column 3) as a JPEG file"""
+        """Open a grid-selection popup then save chosen tiles as JPEG files."""
         if self.canvas.cv_image is None:
             QMessageBox.warning(self, "Warning", "No image loaded. Please load an image first.")
             return
-        
-        # Get image dimensions
+
         img_height, img_width = self.canvas.cv_image.shape[:2]
-        
-        # Calculate grid cell size from percentage
         smaller_dimension = min(img_width, img_height)
         grid_cell_size = int(smaller_dimension * (self.canvas.grid_size_percent / 100.0))
-        
+
         if grid_cell_size == 0:
             QMessageBox.warning(self, "Warning", "Grid size is too small. Please increase grid size percentage.")
             return
-        
-        # C3 means row C (index 2) and column 3 (index 2, since columns are 1-indexed)
-        row_index = 2  # C is the 3rd row (0-indexed)
-        col_index = 2  # Column 3 is the 3rd column (0-indexed)
-        
-        # The grid is fixed; the image pans underneath it by (grid_offset_x, grid_offset_y).
-        # So the image pixel that appears at grid position (col*gs, row*gs) is
-        # (col*gs - grid_offset_x, row*gs - grid_offset_y).
-        x_start = int(col_index * grid_cell_size - self.canvas.grid_offset_x)
-        y_start = int(row_index * grid_cell_size - self.canvas.grid_offset_y)
-        x_end = min(x_start + grid_cell_size, img_width)
-        y_end = min(y_start + grid_cell_size, img_height)
-        
-        # Check if C3 exists within image bounds
-        if x_start >= img_width or y_start >= img_height or x_end <= 0 or y_end <= 0:
-            QMessageBox.warning(self, "Warning", "C3 tile is outside image bounds. Please reduce grid size or check image.")
-            return
-        
-        # Clamp to valid image bounds
-        x_start = max(0, x_start)
-        y_start = max(0, y_start)
 
-        # Use display_image so effects (tilt etc.) are captured, matching what the user sees
-        source_image = self.canvas.display_image if self.canvas.display_image is not None else self.canvas.cv_image
-        tile_image = source_image[y_start:y_end, x_start:x_end]
-        
-        # Calculate target resolution based on tile size and DPI
+        num_cols = max(1, int(np.ceil(img_width  / grid_cell_size)))
+        num_rows = max(1, int(np.ceil(img_height / grid_cell_size)))
+
+        # ── Grid-selection dialog ──────────────────────────────────────────
+        from PyQt5.QtWidgets import (QDialog, QDialogButtonBox, QCheckBox,
+                                     QScrollArea as _QSA, QWidget as _QW)
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Select Grid Tiles to Save")
+        dlg_layout = QVBoxLayout(dlg)
+
+        info = QLabel(f"Grid: {num_rows} rows × {num_cols} columns  "
+                      f"(cell size {grid_cell_size} px)")
+        dlg_layout.addWidget(info)
+
+        # Select-all / deselect-all buttons
+        sel_btns = QHBoxLayout()
+        sel_all_btn   = QPushButton("Select All")
+        desel_all_btn = QPushButton("Deselect All")
+        sel_btns.addWidget(sel_all_btn)
+        sel_btns.addWidget(desel_all_btn)
+        dlg_layout.addLayout(sel_btns)
+
+        # Scrollable checkbox grid
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        grid_widget = QWidget()
+        grid_layout = QGridLayout(grid_widget)
+        grid_layout.setSpacing(2)
+        scroll.setWidget(grid_widget)
+        dlg_layout.addWidget(scroll)
+
+        # Build checkboxes  { (row_idx, col_idx): QCheckBox }
+        checkboxes = {}
+        for r in range(num_rows):
+            row_letter = chr(ord('A') + r) if r < 26 else f"R{r+1}"
+            for c in range(num_cols):
+                label = f"{row_letter}{c + 1}"
+                cb = QCheckBox(label)
+                grid_layout.addWidget(cb, r, c)
+                checkboxes[(r, c)] = cb
+
+        def select_all():
+            for cb in checkboxes.values():
+                cb.setChecked(True)
+
+        def deselect_all():
+            for cb in checkboxes.values():
+                cb.setChecked(False)
+
+        sel_all_btn.clicked.connect(select_all)
+        desel_all_btn.clicked.connect(deselect_all)
+
+        btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btn_box.accepted.connect(dlg.accept)
+        btn_box.rejected.connect(dlg.reject)
+        dlg_layout.addWidget(btn_box)
+
+        dlg.resize(min(120 * num_cols + 40, 900),
+                   min(40  * num_rows + 120, 700))
+
+        if dlg.exec_() != QDialog.Accepted:
+            return
+
+        selected = [(r, c) for (r, c), cb in checkboxes.items() if cb.isChecked()]
+        if not selected:
+            QMessageBox.information(self, "Info", "No tiles selected.")
+            return
+
+        # ── Choose output folder ───────────────────────────────────────────
+        from PyQt5.QtWidgets import QFileDialog as _QFD
+        folder = QFileDialog.getExistingDirectory(self, "Choose Output Folder")
+        if not folder:
+            return
+
+        # ── Export selected tiles ──────────────────────────────────────────
         tile_size_mm = self.tile_size_spin.value()
-        dpi = self.dpi_spin.value()
-        
-        # Convert mm to inches (1 inch = 25.4 mm)
-        tile_size_inches = tile_size_mm / 25.4
-        
-        # Calculate target pixel size
-        target_pixels = int(tile_size_inches * dpi)
-        
-        # Resize tile to target resolution (maintaining aspect ratio by making it square)
-        tile_resized = cv2.resize(tile_image, (target_pixels, target_pixels), interpolation=cv2.INTER_LANCZOS4)
-        
-        # Ask user for save location
-        path, _ = QFileDialog.getSaveFileName(self, "Save C3 Tile Image", "C3_tile.jpg", "JPEG Images (*.jpg *.jpeg)")
-        if path:
-            # Convert RGB to BGR for OpenCV
+        dpi          = self.dpi_spin.value()
+        target_pixels = int((tile_size_mm / 25.4) * dpi)
+        source_image  = (self.canvas.display_image
+                         if self.canvas.display_image is not None
+                         else self.canvas.cv_image)
+
+        import os
+        saved, skipped = [], []
+        for (row_index, col_index) in selected:
+            row_letter = chr(ord('A') + row_index) if row_index < 26 else f"R{row_index+1}"
+            tile_name  = f"{row_letter}{col_index + 1}"
+
+            x_start = int(col_index * grid_cell_size - self.canvas.grid_offset_x)
+            y_start = int(row_index * grid_cell_size - self.canvas.grid_offset_y)
+            x_end   = x_start + grid_cell_size
+            y_end   = y_start + grid_cell_size
+
+            # Skip tiles fully outside image
+            if x_start >= img_width or y_start >= img_height or x_end <= 0 or y_end <= 0:
+                skipped.append(tile_name)
+                continue
+
+            x_start_c = max(0, x_start)
+            y_start_c = max(0, y_start)
+            x_end_c   = min(x_end, img_width)
+            y_end_c   = min(y_end, img_height)
+
+            tile_image  = source_image[y_start_c:y_end_c, x_start_c:x_end_c]
+            tile_resized = cv2.resize(tile_image, (target_pixels, target_pixels),
+                                      interpolation=cv2.INTER_LANCZOS4)
             tile_bgr = cv2.cvtColor(tile_resized, cv2.COLOR_RGB2BGR)
-            success = cv2.imwrite(path, tile_bgr, [cv2.IMWRITE_JPEG_QUALITY, 95])
-            if success:
-                QMessageBox.information(self, "Success", 
-                    f"C3 tile saved successfully to:\n{path}\n\n"
-                    f"Resolution: {target_pixels}x{target_pixels} pixels\n"
-                    f"Tile Size: {tile_size_mm} mm\n"
-                    f"DPI: {dpi}")
+
+            out_path = os.path.join(folder, f"{tile_name}.jpg")
+            if cv2.imwrite(out_path, tile_bgr, [cv2.IMWRITE_JPEG_QUALITY, 95]):
+                saved.append(tile_name)
             else:
-                QMessageBox.critical(self, "Error", "Failed to save tile image.")
+                skipped.append(tile_name)
+
+        msg = f"Saved {len(saved)} tile(s) to:\n{folder}"
+        if skipped:
+            msg += f"\n\nSkipped (out of bounds): {', '.join(skipped)}"
+        QMessageBox.information(self, "Done", msg)
 
     def update_resolution(self):
         self.canvas.set_target_resolution(self.width_spin.value(), self.height_spin.value())
