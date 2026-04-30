@@ -38,6 +38,8 @@ class ImageCanvas(QWidget):
         self.grid_size_percent = 10  # Grid cell size as percentage of image size
         self.grid_offset_x = 0  # Grid horizontal offset in pixels
         self.grid_offset_y = 0  # Grid vertical offset in pixels
+        self.grid_line_thickness = 2  # Grid line thickness in pixels
+        self.polygon_line_thickness = 1  # Polygon line thickness in pixels
         # Circles: each entry is [cx, cy, radius]
         self.circles = []
         self.drawing_circle = False
@@ -61,22 +63,23 @@ class ImageCanvas(QWidget):
         # Load image using OpenCV
         img = cv2.imread(file_path)
         if img is not None:
-            # Convert BGR to RGB
-            self.cv_image = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            new_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            # If a project image is already loaded (has polygons/circles), resize the new
+            # image to match the existing image dimensions so all overlays stay aligned.
+            if self.cv_image is not None and (self.polygons or self.circles):
+                old_h, old_w = self.cv_image.shape[:2]
+                new_img = cv2.resize(new_img, (old_w, old_h), interpolation=cv2.INTER_LANCZOS4)
+            self.cv_image = new_img
             self.display_image = self.cv_image.copy()
             self.scale_factor = 1.0
-            self.update_image_from_cv()
-            self.points = []
-            self.polygons = []
-            self.polygon_effects = []
             self.current_polygon = []
-            self.circles = []
             self.selecting_mode = False
             self.drawing_polygon = False
             self.drawing_circle = False
             self.selected_circle_index = None
             self.dragging_circle_index = None
             self.resizing_circle_index = None
+            self.apply_effects()
             self.update()
         else:
             QMessageBox.critical(self, "Error", "Failed to load image.")
@@ -98,10 +101,12 @@ class ImageCanvas(QWidget):
     def update_image_from_cv(self):
         if self.display_image is None:
             return
-        height, width, channel = self.display_image.shape
+        # Ensure the array is C-contiguous so bytes_per_line calculation is correct
+        img = np.ascontiguousarray(self.display_image)
+        height, width, channel = img.shape
         bytes_per_line = 3 * width
-        # Create QImage from numpy array
-        self.image = QImage(self.display_image.data, width, height, bytes_per_line, QImage.Format_RGB888)
+        # .copy() makes the QImage own its data, preventing stale-buffer bugs
+        self.image = QImage(img.data, width, height, bytes_per_line, QImage.Format_RGB888).copy()
         self.update_canvas_size()
         self.update()
 
@@ -665,6 +670,7 @@ class ImageCanvas(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
         
         # Define offset for grid labels
         label_offset = 30
@@ -690,7 +696,7 @@ class ImageCanvas(QWidget):
         
         # Draw grid if enabled
         if self.show_grid and self.image and self.grid_size_percent > 0:
-            painter.setPen(QPen(QColor(173, 216, 230), 2))  # Light blue, 2 pixels wide
+            painter.setPen(QPen(QColor(173, 216, 230), self.grid_line_thickness))  # Light blue
             
             # Get image dimensions
             img_width = self.image.width()
@@ -748,9 +754,9 @@ class ImageCanvas(QWidget):
             for idx, poly in enumerate(self.polygons):
                 # Highlight selected polygon
                 if idx == self.selected_polygon_index:
-                    painter.setPen(QPen(Qt.magenta, 1))
+                    painter.setPen(QPen(Qt.magenta, self.polygon_line_thickness))
                 else:
-                    painter.setPen(QPen(Qt.green, 1))
+                    painter.setPen(QPen(Qt.green, self.polygon_line_thickness))
                 
                 if len(poly) > 1:
                     for i in range(len(poly) - 1):
@@ -863,6 +869,10 @@ class MainWindow(QMainWindow):
 
         save_btn = QPushButton("Save Image")
         save_btn.clicked.connect(self.save_image)
+
+        save_circle_btn = QPushButton("Save Circle")
+        save_circle_btn.clicked.connect(self.save_circle_image)
+        save_circle_btn.setToolTip("Save the image inside the selected circle at full original resolution")
         
         save_array_btn = QPushButton("Save Array")
         save_array_btn.clicked.connect(self.save_array)
@@ -897,6 +907,7 @@ class MainWindow(QMainWindow):
         sidebar_layout.addWidget(self.polygon_btn)
         sidebar_layout.addWidget(self.circle_btn)
         sidebar_layout.addWidget(save_btn)
+        sidebar_layout.addWidget(save_circle_btn)
         sidebar_layout.addWidget(save_array_btn)
         sidebar_layout.addWidget(load_array_btn)
         sidebar_layout.addWidget(save_project_btn)
@@ -1025,8 +1036,48 @@ class MainWindow(QMainWindow):
         self.grid_size_spin.valueChanged.connect(self.update_grid_size)
         right_sidebar_layout.addWidget(self.grid_size_spin)
 
+        right_sidebar_layout.addSpacing(6)
+        right_sidebar_layout.addWidget(QLabel("Grid Line Thickness:"))
+        self.grid_thickness_spin = QSpinBox()
+        self.grid_thickness_spin.setRange(1, 20)
+        self.grid_thickness_spin.setValue(2)
+        self.grid_thickness_spin.setSuffix(" px")
+        self.grid_thickness_spin.setToolTip("Grid line thickness in pixels")
+        self.grid_thickness_spin.valueChanged.connect(self.update_grid_line_thickness)
+        right_sidebar_layout.addWidget(self.grid_thickness_spin)
+
+        right_sidebar_layout.addSpacing(6)
+        right_sidebar_layout.addWidget(QLabel("Polygon Line Thickness:"))
+        self.polygon_thickness_spin = QSpinBox()
+        self.polygon_thickness_spin.setRange(1, 20)
+        self.polygon_thickness_spin.setValue(1)
+        self.polygon_thickness_spin.setSuffix(" px")
+        self.polygon_thickness_spin.setToolTip("Polygon line thickness in pixels")
+        self.polygon_thickness_spin.valueChanged.connect(self.update_polygon_line_thickness)
+        right_sidebar_layout.addWidget(self.polygon_thickness_spin)
+
+        right_sidebar_layout.addSpacing(6)
+        right_sidebar_layout.addWidget(QLabel("Scale Polygon Array:"))
+        scale_poly_layout = QHBoxLayout()
+        self.poly_scale_spin = QSpinBox()
+        self.poly_scale_spin.setRange(1, 10000)
+        self.poly_scale_spin.setValue(100)
+        self.poly_scale_spin.setSuffix(" %")
+        self.poly_scale_spin.setToolTip("Scale all polygon coordinates by this percentage")
+        scale_poly_layout.addWidget(self.poly_scale_spin)
+        apply_scale_btn = QPushButton("Apply")
+        apply_scale_btn.setToolTip("Scale all polygon coordinates")
+        apply_scale_btn.clicked.connect(self.apply_polygon_scale)
+        scale_poly_layout.addWidget(apply_scale_btn)
+        right_sidebar_layout.addLayout(scale_poly_layout)
+
         right_sidebar_layout.addSpacing(10)
         right_sidebar_layout.addWidget(QLabel("Move Image:"))
+
+        from PyQt5.QtWidgets import QCheckBox
+        self.move_polygons_chk = QCheckBox("Move Polygons")
+        self.move_polygons_chk.setToolTip("When checked, polygons and circles move together with the image")
+        right_sidebar_layout.addWidget(self.move_polygons_chk)
 
         grid_arrows_layout = QGridLayout()
         grid_arrows_layout.setSpacing(2)
@@ -1252,6 +1303,26 @@ class MainWindow(QMainWindow):
         self.canvas.update_canvas_size()
         self.canvas.update()
 
+    def update_grid_line_thickness(self):
+        self.canvas.grid_line_thickness = self.grid_thickness_spin.value()
+        self.canvas.update()
+
+    def update_polygon_line_thickness(self):
+        self.canvas.polygon_line_thickness = self.polygon_thickness_spin.value()
+        self.canvas.update()
+
+    def apply_polygon_scale(self):
+        if not self.canvas.polygons:
+            QMessageBox.warning(self, "Warning", "No polygons to scale.")
+            return
+        scale = self.poly_scale_spin.value() / 100.0
+        self.canvas.polygons = [
+            [(x * scale, y * scale) for x, y in poly]
+            for poly in self.canvas.polygons
+        ]
+        self.canvas.apply_effects()
+        self.canvas.update()
+
     def pan_image(self, dx, dy):
         step = self.grid_step_spin.value()
         hbar = self.scroll_area.horizontalScrollBar()
@@ -1269,25 +1340,27 @@ class MainWindow(QMainWindow):
         delta_y = dy * step
         self.canvas.grid_offset_x += delta_x
         self.canvas.grid_offset_y += delta_y
-        for circ in self.canvas.circles:
-            circ[0] += delta_x
-            circ[1] += delta_y
-        self.canvas.polygons = [
-            [(px + delta_x, py + delta_y) for px, py in poly]
-            for poly in self.canvas.polygons
-        ]
+        if self.move_polygons_chk.isChecked():
+            for circ in self.canvas.circles:
+                circ[0] += delta_x
+                circ[1] += delta_y
+            self.canvas.polygons = [
+                [(px + delta_x, py + delta_y) for px, py in poly]
+                for poly in self.canvas.polygons
+            ]
         self.canvas.update()
 
     def reset_grid_offset(self):
         delta_x = -self.canvas.grid_offset_x
         delta_y = -self.canvas.grid_offset_y
-        for circ in self.canvas.circles:
-            circ[0] += delta_x
-            circ[1] += delta_y
-        self.canvas.polygons = [
-            [(px + delta_x, py + delta_y) for px, py in poly]
-            for poly in self.canvas.polygons
-        ]
+        if self.move_polygons_chk.isChecked():
+            for circ in self.canvas.circles:
+                circ[0] += delta_x
+                circ[1] += delta_y
+            self.canvas.polygons = [
+                [(px + delta_x, py + delta_y) for px, py in poly]
+                for poly in self.canvas.polygons
+            ]
         self.canvas.grid_offset_x = 0
         self.canvas.grid_offset_y = 0
         self.canvas.update()
@@ -1432,7 +1505,24 @@ class MainWindow(QMainWindow):
     def load_image(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open Image", "", "Images (*.png *.jpg *.jpeg *.bmp)")
         if path:
+            has_project = bool(self.canvas.polygons or self.canvas.circles)
             self.canvas.load_image(path)
+            if self.canvas.cv_image is not None:
+                h, w = self.canvas.cv_image.shape[:2]
+                if not has_project:
+                    # Fresh load — update spinboxes and auto-fit
+                    self.width_spin.blockSignals(True)
+                    self.height_spin.blockSignals(True)
+                    self.width_spin.setValue(w)
+                    self.height_spin.setValue(h)
+                    self.width_spin.blockSignals(False)
+                    self.height_spin.blockSignals(False)
+                    self.canvas.set_target_resolution(w, h)
+                    vp = self.scroll_area.viewport()
+                    fit_scale = min(vp.width() / w, vp.height() / h)
+                    self.canvas.scale_factor = fit_scale
+                    self.canvas.update_canvas_size()
+                    self.canvas.update()
 
     def save_image(self):
         if self.canvas.image is None:
@@ -1441,6 +1531,59 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, "Save Image", "stretched.png", "Images (*.png *.jpg *.jpeg *.bmp)")
         if path:
             self.canvas.image.save(path)
+
+    def save_circle_image(self):
+        """Save the image region inside the selected circle at full original resolution."""
+        if self.canvas.cv_image is None:
+            QMessageBox.warning(self, "Warning", "No image loaded.")
+            return
+        if self.canvas.selected_circle_index is None or not self.canvas.circles:
+            QMessageBox.warning(self, "Warning", "No circle selected. Click a circle to select it first.")
+            return
+
+        cx, cy, radius = self.canvas.circles[self.canvas.selected_circle_index]
+        img_h, img_w = self.canvas.cv_image.shape[:2]
+
+        # Bounding box of the circle
+        x1 = int(cx - radius)
+        y1 = int(cy - radius)
+        x2 = int(cx + radius)
+        y2 = int(cy + radius)
+
+        # Clamp to image bounds
+        x1c = max(0, x1)
+        y1c = max(0, y1)
+        x2c = min(img_w, x2)
+        y2c = min(img_h, y2)
+
+        if x2c <= x1c or y2c <= y1c:
+            QMessageBox.warning(self, "Warning", "Circle is outside the image bounds.")
+            return
+
+        # Crop from the original unscaled image
+        crop = self.canvas.cv_image[y1c:y2c, x1c:x2c].copy()
+
+        # Circle centre relative to the (potentially clamped) crop
+        local_cx = cx - x1
+        local_cy = cy - y1
+        # Offset by any clamping
+        local_cx -= (x1c - x1)
+        local_cy -= (y1c - y1)
+
+        crop_h, crop_w = crop.shape[:2]
+        Y, X = np.ogrid[:crop_h, :crop_w]
+        mask = ((X - local_cx) ** 2 + (Y - local_cy) ** 2 <= radius ** 2).astype(np.uint8) * 255
+
+        # Build RGBA output
+        crop_rgba = cv2.cvtColor(crop, cv2.COLOR_RGB2RGBA)
+        crop_rgba[:, :, 3] = mask
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Circle Image", "circle.png", "PNG Images (*.png)"
+        )
+        if path:
+            cv2.imwrite(path, cv2.cvtColor(crop_rgba, cv2.COLOR_RGBA2BGRA))
+            QMessageBox.information(self, "Success", f"Circle image saved to:\n{path}")
     
     def save_array(self):
         """Save polygons to CSV file compatible with mosaic_editor_pyqt"""

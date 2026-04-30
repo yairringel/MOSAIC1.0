@@ -46,6 +46,10 @@ class CutterCanvas(QWidget):
         self.last_mouse_pos = None
         self.is_panning = False
         
+        # Measure tool
+        self.measure_mode = False
+        self.measure_points = []  # Up to 2 world-coordinate tuples
+        
         # Grid variables
         self.show_grid = False  # Whether to show the grid
         self.grid_size = 300  # Size of each individual grid box/cell in world coordinates
@@ -345,6 +349,19 @@ class CutterCanvas(QWidget):
         info_text = f"Polygons: {len(self.polygons)} | Zoom: {self.scale_factor:.2f}x"
         painter.drawText(10, self.height() - 10, info_text)
         
+        # Draw measure points and line
+        if self.measure_mode and self.measure_points:
+            painter.setPen(QPen(QColor(255, 50, 50), 2))
+            painter.setBrush(QBrush(QColor(255, 50, 50)))
+            screen_pts = []
+            for wx, wy in self.measure_points:
+                sx, sy = self.world_to_screen(wx, wy)
+                screen_pts.append((int(sx), int(sy)))
+                painter.drawEllipse(int(sx) - 5, int(sy) - 5, 10, 10)
+            if len(screen_pts) == 2:
+                painter.drawLine(screen_pts[0][0], screen_pts[0][1],
+                                 screen_pts[1][0], screen_pts[1][1])
+        
         # Draw grid if enabled
         if self.show_grid:
             self.draw_grid(painter)
@@ -461,6 +478,24 @@ class CutterCanvas(QWidget):
     def mousePressEvent(self, event):
         """Handle mouse press for panning and grid dragging"""
         if event.button() == Qt.LeftButton:
+            # Measure mode: collect points and show distance
+            if self.measure_mode:
+                world_x, world_y = self.screen_to_world(event.x(), event.y())
+                self.measure_points.append((world_x, world_y))
+                if len(self.measure_points) == 2:
+                    dx = self.measure_points[1][0] - self.measure_points[0][0]
+                    dy = self.measure_points[1][1] - self.measure_points[0][1]
+                    distance = (dx ** 2 + dy ** 2) ** 0.5
+                    QMessageBox.information(
+                        self, "Measurement",
+                        f"Distance: {distance:.2f} units\n\n"
+                        f"Point 1: ({self.measure_points[0][0]:.2f}, {self.measure_points[0][1]:.2f})\n"
+                        f"Point 2: ({self.measure_points[1][0]:.2f}, {self.measure_points[1][1]:.2f})"
+                    )
+                    self.measure_points = []
+                self.update()
+                return  # Don't pan/drag while measuring
+            
             # Check if we're clicking on the grid handle
             if self.show_grid and self.is_point_on_grid_handle(event.x(), event.y()):
                 # Start grid dragging
@@ -663,6 +698,12 @@ class ControlPanel(QWidget):
         self.save_boxes_btn.clicked.connect(self.on_save_boxes_clicked)
         layout.addWidget(self.save_boxes_btn)
         
+        # Measure button
+        self.measure_btn = QPushButton("Measure")
+        self.measure_btn.setCheckable(True)
+        self.measure_btn.clicked.connect(self.on_measure_clicked)
+        layout.addWidget(self.measure_btn)
+        
         # Add stretch to push everything to the top
         layout.addStretch()
         
@@ -732,6 +773,14 @@ class ControlPanel(QWidget):
         except ValueError:
             # Invalid input, ignore
             pass
+    
+    def on_measure_clicked(self, checked):
+        """Handle Measure button toggle"""
+        if self.canvas:
+            self.canvas.measure_mode = checked
+            self.canvas.measure_points = []
+            self.canvas.setCursor(Qt.CrossCursor if checked else Qt.ArrowCursor)
+            self.canvas.update()
     
     def on_cut_clicked(self):
         """Handle Cut button click - assign colors based on grid boxes"""
