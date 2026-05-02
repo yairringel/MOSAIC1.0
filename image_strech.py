@@ -1315,10 +1315,13 @@ class MainWindow(QMainWindow):
         if not self.canvas.polygons:
             QMessageBox.warning(self, "Warning", "No polygons to scale.")
             return
+        # Snapshot originals on first scale so subsequent scales are always relative to original
+        if not hasattr(self, '_original_polygons') or self._original_polygons is None:
+            self._original_polygons = [list(poly) for poly in self.canvas.polygons]
         scale = self.poly_scale_spin.value() / 100.0
         self.canvas.polygons = [
             [(x * scale, y * scale) for x, y in poly]
-            for poly in self.canvas.polygons
+            for poly in self._original_polygons
         ]
         self.canvas.apply_effects()
         self.canvas.update()
@@ -1745,6 +1748,7 @@ class MainWindow(QMainWindow):
             if polygons:
                 # Clear existing polygons and load new ones
                 self.canvas.polygons = polygons
+                self._original_polygons = None  # reset scale snapshot
                 # Also clear polygon effects and reset selection
                 self.canvas.polygon_effects = [{
                     'brightness': 0,
@@ -1811,6 +1815,7 @@ class MainWindow(QMainWindow):
                 
                 self.canvas.cv_image = data['image']
                 self.canvas.polygons = data['polygons']
+                self._original_polygons = None  # reset scale snapshot
                 self.canvas.polygon_effects = data['effects']
                 self.canvas.target_width = data.get('width', 300)
                 self.canvas.target_height = data.get('height', 300)

@@ -14,7 +14,7 @@ from scipy.interpolate import splprep, splev
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QFrame, QLabel, QPushButton, QFileDialog, QCheckBox, QSpinBox, QLineEdit, QInputDialog, QMessageBox,
-    QSizePolicy, QSlider
+    QSizePolicy, QSlider, QColorDialog
 )
 from PyQt5.QtCore import Qt, QPoint, QTimer, pyqtSignal
 from PyQt5.QtGui import QPainter, QColor, QPen, QPixmap, QBrush, QFont, QPolygon, QCursor, QLinearGradient
@@ -168,6 +168,7 @@ class Canvas(QWidget):
         
         # Drawing properties
         self.edge_width = 1.1  # Width for polygon edges
+        self.background_color = QColor(255, 255, 255)  # Canvas background color
         
         # Enable mouse tracking for cursor display
         self.setMouseTracking(True)
@@ -2015,7 +2016,7 @@ class Canvas(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
         
         # Fill canvas with white background
-        painter.fillRect(self.rect(), QColor(255, 255, 255))
+        painter.fillRect(self.rect(), self.background_color)
         
         # Apply zoom and pan transformation
         painter.translate(self.pan_offset_x, self.pan_offset_y)
@@ -2486,11 +2487,12 @@ class ColorPickerWidget(QWidget):
     def _apply_color(self, color):
         """Push a QColor into all sub-widgets without feedback loops."""
         self._updating = True
-        h, s, v, _ = color.getHsv()   # h: 0-359 or -1
-        if h < 0:
-            h = 0
-        self._hue_bar.set_hue(h)
-        self._sv.set_hue(h)
+        h, s, v, _ = color.getHsv()   # h: 0-359 or -1 (achromatic)
+        if h >= 0:
+            # Chromatic: update hue bar and SV square hue
+            self._hue_bar.set_hue(h)
+            self._sv.set_hue(h)
+        # else: achromatic (gray) — leave the hue bar where it is, only update SV
         self._sv.set_sv(s / 255.0, v / 255.0)
         self._spins[0].setValue(color.red())
         self._spins[1].setValue(color.green())
@@ -3153,6 +3155,33 @@ class SidePanel(QFrame):
         variance_row.addWidget(self._variance_label)
         variance_row.addStretch()
         layout.addLayout(variance_row)
+
+        # Background color button
+        bg_row = QHBoxLayout()
+        bg_row.setSpacing(4)
+        bg_row.addWidget(QLabel('Background:'))
+        self._bg_color_box = QLabel()
+        self._bg_color_box.setFixedSize(36, 22)
+        self._bg_color_box.setStyleSheet('background-color: rgb(255,255,255); border: 2px solid #555;')
+        bg_row.addWidget(self._bg_color_box)
+        bg_btn = QPushButton('Change')
+        bg_btn.setFixedSize(55, 22)
+        bg_btn.setToolTip('Change the canvas background color')
+        bg_btn.clicked.connect(self._change_background_color)
+        bg_row.addWidget(bg_btn)
+        bg_row.addStretch()
+        layout.addLayout(bg_row)
+
+    def _change_background_color(self):
+        """Open a color dialog to change the canvas background color."""
+        if not self.canvas:
+            return
+        color = QColorDialog.getColor(self.canvas.background_color, self, 'Choose Background Color')
+        if color.isValid():
+            self.canvas.background_color = color
+            r, g, b = color.red(), color.green(), color.blue()
+            self._bg_color_box.setStyleSheet(f'background-color: rgb({r},{g},{b}); border: 2px solid #555;')
+            self.canvas.update()
 
     def _on_replace_sample_btn_clicked(self, checked):
         """Toggle replace-source eyedropper via its button."""
