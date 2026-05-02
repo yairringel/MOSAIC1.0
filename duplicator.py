@@ -14,7 +14,7 @@ from scipy.interpolate import splprep, splev
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QFrame, QLabel, QPushButton, QFileDialog, QCheckBox, QSpinBox, QLineEdit, QInputDialog, QMessageBox,
-    QSizePolicy
+    QSizePolicy, QSlider
 )
 from PyQt5.QtCore import Qt, QPoint, QTimer, pyqtSignal
 from PyQt5.QtGui import QPainter, QColor, QPen, QPixmap, QBrush, QFont, QPolygon, QCursor, QLinearGradient
@@ -108,6 +108,9 @@ class Canvas(QWidget):
 
         # Eyedropper mode
         self.eyedropper_mode = False  # Whether to sample a polygon color on next click
+
+        # Replace-color eyedropper mode
+        self.replace_eyedropper_mode = False  # Whether to sample source color for replace-all
         
         # Random mode
         self.random_mode = False  # Whether to apply random variations in polygon drawing
@@ -686,17 +689,36 @@ class Canvas(QWidget):
                     self.left_panel.receive_eyedropper_color(QColor(color))
                 return
 
-    def paint_polygon_at_point(self, world_x, world_y):
-        """Paint a polygon at the clicked point with the selected color"""
-        # Find the polygon at the clicked point
-        clicked_polygon_index = -1
+    def sample_replace_source_at_point(self, world_x, world_y):
+        """Sample the source color for replace-all and send it to the left panel."""
+        self.replace_eyedropper_mode = False
+        self.setCursor(Qt.ArrowCursor)
+        candidates = []
         for i, polygon_data in enumerate(self.polygons):
             if self.point_in_polygon(world_x, world_y, polygon_data['points']):
-                clicked_polygon_index = i
-                break
-        
-        if clicked_polygon_index == -1:
+                area = self.calculate_polygon_area(polygon_data['points'])
+                candidates.append((i, area))
+        if candidates:
+            candidates.sort(key=lambda x: (x[1], -x[0]))
+            color = self.polygons[candidates[0][0]].get('color')
+            if color is not None and hasattr(self, 'left_panel'):
+                self.left_panel.receive_replace_source_color(QColor(color))
+
+    def paint_polygon_at_point(self, world_x, world_y):
+        """Paint a polygon at the clicked point with the selected color"""
+        # Find the topmost (smallest area) polygon at the clicked point
+        candidates = []
+        for i, polygon_data in enumerate(self.polygons):
+            if self.point_in_polygon(world_x, world_y, polygon_data['points']):
+                area = self.calculate_polygon_area(polygon_data['points'])
+                candidates.append((i, area))
+
+        if not candidates:
             return  # No polygon found at click point
+
+        # Pick smallest polygon (same logic as select_polygon_at_point)
+        candidates.sort(key=lambda x: (x[1], -x[0]))
+        clicked_polygon_index = candidates[0][0]
         
         # Save state before painting
         self.save_state()
@@ -964,6 +986,10 @@ class Canvas(QWidget):
             pass  # reserved for future use
         elif event.button() == Qt.LeftButton and not self.polygon_mode:
             # Eyedropper: sample polygon color if active (before all other handlers)
+            if self.replace_eyedropper_mode:
+                world_x, world_y = self.screen_to_world(event.x(), event.y())
+                self.sample_replace_source_at_point(world_x, world_y)
+                return
             if self.eyedropper_mode:
                 world_x, world_y = self.screen_to_world(event.x(), event.y())
                 self.sample_polygon_color_at_point(world_x, world_y)
@@ -3082,6 +3108,112 @@ class SidePanel(QFrame):
         self.color_picker._sv.hover_color.connect(self._on_palette_hover)
         self.color_picker.color_changed.connect(self._saved_palette.fill_armed_slot)
         layout.addWidget(self._saved_palette)
+
+        # Replace-color row
+        self._replace_from_color = None
+        replace_row = QHBoxLayout()
+        replace_row.setSpacing(4)
+        replace_row.addWidget(QLabel('Replace:'))
+        self._replace_from_box = QLabel()
+        self._replace_from_box.setFixedSize(36, 22)
+        self._replace_from_box.setStyleSheet('background-color: transparent; border: 2px dashed #888;')
+        self._replace_from_box.setToolTip('Source color to replace — use ⊕ to sample from canvas')
+        replace_row.addWidget(self._replace_from_box)
+        self._replace_sample_btn = QPushButton('⊕')
+        self._replace_sample_btn.setFixedSize(22, 22)
+        self._replace_sample_btn.setToolTip('Click then click a polygon to set source color')
+        self._replace_sample_btn.setCheckable(True)
+        self._replace_sample_btn.clicked.connect(self._on_replace_sample_btn_clicked)
+        replace_row.addWidget(self._replace_sample_btn)
+        replace_row.addWidget(QLabel('→ current color'))
+        self._replace_apply_btn = QPushButton('Apply')
+        self._replace_apply_btn.setFixedSize(40, 22)
+        self._replace_apply_btn.setToolTip('Replace all polygons with source color → current color')
+        self._replace_apply_btn.clicked.connect(self._apply_replace_color)
+        replace_row.addWidget(self._replace_apply_btn)
+        replace_row.addStretch()
+        layout.addLayout(replace_row)
+
+        # Color variance row
+        variance_row = QHBoxLayout()
+        variance_row.setSpacing(4)
+        variance_btn = QPushButton('Vary Colors')
+        variance_btn.setToolTip('Randomly shift every polygon color by up to the variance amount')
+        variance_btn.clicked.connect(self._apply_color_variance)
+        variance_row.addWidget(variance_btn)
+        self._variance_slider = QSlider(Qt.Horizontal)
+        self._variance_slider.setRange(0, 128)
+        self._variance_slider.setValue(20)
+        self._variance_slider.setFixedWidth(80)
+        self._variance_slider.setToolTip('Max color variance per channel (0–128)')
+        variance_row.addWidget(self._variance_slider)
+        self._variance_label = QLabel('20')
+        self._variance_label.setFixedWidth(24)
+        self._variance_slider.valueChanged.connect(lambda v: self._variance_label.setText(str(v)))
+        variance_row.addWidget(self._variance_label)
+        variance_row.addStretch()
+        layout.addLayout(variance_row)
+
+    def _on_replace_sample_btn_clicked(self, checked):
+        """Toggle replace-source eyedropper via its button."""
+        if checked:
+            if self.canvas:
+                self.canvas.replace_eyedropper_mode = True
+                self.canvas.setCursor(Qt.CrossCursor)
+            self._replace_sample_btn.setStyleSheet('background-color: #f90; border: 2px solid #c60;')
+        else:
+            if self.canvas:
+                self.canvas.replace_eyedropper_mode = False
+                self.canvas.setCursor(Qt.ArrowCursor)
+            self._replace_sample_btn.setStyleSheet('')
+
+    def receive_replace_source_color(self, color):
+        """Called by Canvas after replace-source eyedropper samples a polygon."""
+        self._replace_from_color = color
+        r, g, b = color.red(), color.green(), color.blue()
+        self._replace_from_box.setStyleSheet(
+            f'background-color: rgb({r},{g},{b}); border: 2px solid #555;'
+        )
+        self._replace_sample_btn.setChecked(False)
+        self._replace_sample_btn.setStyleSheet('')
+
+    def _apply_replace_color(self):
+        """Replace all polygons matching the source color with the current selected color."""
+        if self._replace_from_color is None or not self.canvas:
+            return
+        src = self._replace_from_color
+        dst = self.selected_color
+        count = 0
+        self.canvas.save_state()
+        for polygon in self.canvas.polygons:
+            c = polygon.get('color')
+            if c is not None and c.red() == src.red() and c.green() == src.green() and c.blue() == src.blue():
+                polygon['color'] = QColor(dst)
+                count += 1
+        self.canvas.update()
+        print(f'[replace] replaced {count} polygons')
+
+    def _apply_color_variance(self):
+        """Randomly shift each polygon's color by up to variance per channel."""
+        if not self.canvas or not self.canvas.polygons:
+            return
+        variance = self._variance_slider.value()
+        self.canvas.save_state()
+        for polygon in self.canvas.polygons:
+            c = polygon.get('color')
+            if c is None or c.alpha() == 0:
+                continue  # skip transparent polygons
+            if c.red() == c.green() == c.blue():
+                # Grayscale — shift all channels by the same delta to stay grayscale
+                delta = random.randint(-variance, variance)
+                v = max(0, min(255, c.red() + delta))
+                polygon['color'] = QColor(v, v, v, c.alpha())
+            else:
+                r = max(0, min(255, c.red()   + random.randint(-variance, variance)))
+                g = max(0, min(255, c.green() + random.randint(-variance, variance)))
+                b = max(0, min(255, c.blue()  + random.randint(-variance, variance)))
+                polygon['color'] = QColor(r, g, b, c.alpha())
+        self.canvas.update()
 
     def _start_eyedropper(self):
         """Activate eyedropper mode on the canvas."""
