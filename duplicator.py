@@ -13,10 +13,11 @@ import numpy as np
 from scipy.interpolate import splprep, splev
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
-    QFrame, QLabel, QPushButton, QFileDialog, QCheckBox, QSpinBox, QLineEdit, QInputDialog, QMessageBox
+    QFrame, QLabel, QPushButton, QFileDialog, QCheckBox, QSpinBox, QLineEdit, QInputDialog, QMessageBox,
+    QSizePolicy
 )
-from PyQt5.QtCore import Qt, QPoint, QTimer
-from PyQt5.QtGui import QPainter, QColor, QPen, QPixmap, QBrush, QFont, QPolygon, QCursor
+from PyQt5.QtCore import Qt, QPoint, QTimer, pyqtSignal
+from PyQt5.QtGui import QPainter, QColor, QPen, QPixmap, QBrush, QFont, QPolygon, QCursor, QLinearGradient
 
 class ContinuousButton(QPushButton):
     """Custom button that supports continuous action when held down"""
@@ -104,6 +105,9 @@ class Canvas(QWidget):
         
         # Paint mode
         self.paint_mode = False  # Whether to paint polygons with selected color on click
+
+        # Eyedropper mode
+        self.eyedropper_mode = False  # Whether to sample a polygon color on next click
         
         # Random mode
         self.random_mode = False  # Whether to apply random variations in polygon drawing
@@ -671,6 +675,17 @@ class Canvas(QWidget):
         
         self.update()  # Refresh display
 
+    def sample_polygon_color_at_point(self, world_x, world_y):
+        """Sample the color of the polygon at the clicked point and send it to the left panel."""
+        self.eyedropper_mode = False
+        self.setCursor(Qt.ArrowCursor)
+        for polygon_data in self.polygons:
+            if self.point_in_polygon(world_x, world_y, polygon_data['points']):
+                color = polygon_data.get('color')
+                if color is not None and hasattr(self, 'left_panel'):
+                    self.left_panel.receive_eyedropper_color(QColor(color))
+                return
+
     def paint_polygon_at_point(self, world_x, world_y):
         """Paint a polygon at the clicked point with the selected color"""
         # Find the polygon at the clicked point
@@ -945,7 +960,15 @@ class Canvas(QWidget):
         elif event.button() == Qt.RightButton and self.polygon_mode:
             # Right click finishes the polygon
             self.finish_polygon()
+        elif event.button() == Qt.RightButton and not self.polygon_mode:
+            pass  # reserved for future use
         elif event.button() == Qt.LeftButton and not self.polygon_mode:
+            # Eyedropper: sample polygon color if active (before all other handlers)
+            if self.eyedropper_mode:
+                world_x, world_y = self.screen_to_world(event.x(), event.y())
+                self.sample_polygon_color_at_point(world_x, world_y)
+                return
+
             # Check for eraser mode first
             if self.eraser_mode:
                 world_x, world_y = self.screen_to_world(event.x(), event.y())
@@ -2263,6 +2286,345 @@ class Canvas(QWidget):
         return -1
 
 
+# ---------------------------------------------------------------------------
+# Color picker sub-widgets
+# ---------------------------------------------------------------------------
+
+class _HueBar(QWidget):
+    """Thin horizontal rainbow strip for selecting hue."""
+    hue_changed  = pyqtSignal(float)   # hue in 0-359
+    hover_color  = pyqtSignal(object)  # QColor or None
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._hue = 0.0
+        self.setFixedHeight(16)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setCursor(Qt.CrossCursor)
+        self.setMouseTracking(True)
+
+    def set_hue(self, hue):
+        self._hue = max(0.0, min(359.0, float(hue)))
+        self.update()
+
+    def _hue_from_x(self, x):
+        return max(0.0, min(359.0, x / max(1, self.width()) * 359.0))
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        w, h = self.width(), self.height()
+        grad = QLinearGradient(0, 0, w, 0)
+        for i in range(7):
+            grad.setColorAt(i / 6.0, QColor.fromHsv(min(359, i * 60), 255, 255))
+        p.fillRect(0, 0, w, h, grad)
+        # cursor line
+        x = int(self._hue / 359.0 * (w - 1))
+        p.setPen(QPen(QColor(0, 0, 0), 2))
+        p.drawLine(x, 0, x, h - 1)
+        p.setPen(QPen(QColor(255, 255, 255), 1))
+        p.drawLine(max(0, x - 1), 0, max(0, x - 1), h - 1)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._hue = self._hue_from_x(event.x())
+            self.hue_changed.emit(self._hue)
+            self.update()
+
+    def mouseMoveEvent(self, event):
+        hue = self._hue_from_x(event.x())
+        self.hover_color.emit(QColor.fromHsv(int(hue), 255, 255))
+        if event.buttons() & Qt.LeftButton:
+            self._hue = hue
+            self.hue_changed.emit(self._hue)
+            self.update()
+
+    def leaveEvent(self, event):
+        self.hover_color.emit(None)
+
+
+class _SVSquare(QWidget):
+    """Saturation / Value gradient square for the current hue."""
+    sv_changed  = pyqtSignal(float, float)  # sat, val each in 0-1
+    hover_color = pyqtSignal(object)        # QColor or None
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._hue = 0
+        self._sat = 1.0
+        self._val = 1.0
+        self.setFixedHeight(130)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setCursor(Qt.CrossCursor)
+        self.setMouseTracking(True)
+
+    def set_hue(self, hue):
+        self._hue = int(max(0, min(359, hue)))
+        self.update()
+
+    def set_sv(self, sat, val):
+        self._sat = float(sat)
+        self._val = float(val)
+        self.update()
+
+    def _sv_from_pos(self, x, y):
+        w, h = max(1, self.width()), max(1, self.height())
+        return max(0.0, min(1.0, x / w)), max(0.0, min(1.0, 1.0 - y / h))
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        w, h = self.width(), self.height()
+        # Horizontal: white → pure hue
+        hg = QLinearGradient(0, 0, w, 0)
+        hg.setColorAt(0.0, QColor(255, 255, 255))
+        hg.setColorAt(1.0, QColor.fromHsv(self._hue, 255, 255))
+        p.fillRect(0, 0, w, h, hg)
+        # Vertical overlay: transparent → black
+        vg = QLinearGradient(0, 0, 0, h)
+        vg.setColorAt(0.0, QColor(0, 0, 0, 0))
+        vg.setColorAt(1.0, QColor(0, 0, 0, 255))
+        p.fillRect(0, 0, w, h, vg)
+        # Crosshair circle
+        cx = int(self._sat * (w - 1))
+        cy = int((1.0 - self._val) * (h - 1))
+        p.setPen(QPen(QColor(0, 0, 0), 1))
+        p.drawEllipse(cx - 5, cy - 5, 10, 10)
+        p.setPen(QPen(QColor(255, 255, 255), 1))
+        p.drawEllipse(cx - 4, cy - 4, 8, 8)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._sat, self._val = self._sv_from_pos(event.x(), event.y())
+            self.sv_changed.emit(self._sat, self._val)
+            self.update()
+
+    def mouseMoveEvent(self, event):
+        sat, val = self._sv_from_pos(event.x(), event.y())
+        self.hover_color.emit(QColor.fromHsv(self._hue, int(sat * 255), int(val * 255)))
+        if event.buttons() & Qt.LeftButton:
+            self._sat, self._val = sat, val
+            self.sv_changed.emit(self._sat, self._val)
+            self.update()
+
+    def leaveEvent(self, event):
+        self.hover_color.emit(None)
+
+
+class ColorPickerWidget(QWidget):
+    """HSV color picker: hue bar + SV square + RGB spin boxes."""
+    color_changed = pyqtSignal(QColor)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._updating = False
+        self._build_ui()
+        self._apply_color(QColor(0, 0, 0))
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        self._hue_bar = _HueBar()
+        self._hue_bar.hue_changed.connect(self._hue_changed)
+        layout.addWidget(self._hue_bar)
+
+        self._sv = _SVSquare()
+        self._sv.sv_changed.connect(self._sv_changed)
+        layout.addWidget(self._sv)
+
+        # R G B spinboxes
+        rgb_row = QHBoxLayout()
+        rgb_row.setSpacing(4)
+        self._spins = []
+        for label in ('R', 'G', 'B'):
+            col = QVBoxLayout()
+            col.setSpacing(1)
+            lbl = QLabel(label)
+            lbl.setAlignment(Qt.AlignCenter)
+            sp = QSpinBox()
+            sp.setRange(0, 255)
+            sp.setAlignment(Qt.AlignCenter)
+            sp.setMinimumWidth(52)
+            col.addWidget(lbl)
+            col.addWidget(sp)
+            rgb_row.addLayout(col)
+            self._spins.append(sp)
+        layout.addLayout(rgb_row)
+
+        for sp in self._spins:
+            sp.valueChanged.connect(self._rgb_changed)
+
+    def get_color(self):
+        return QColor(self._spins[0].value(), self._spins[1].value(), self._spins[2].value())
+
+    def _apply_color(self, color):
+        """Push a QColor into all sub-widgets without feedback loops."""
+        self._updating = True
+        h, s, v, _ = color.getHsv()   # h: 0-359 or -1
+        if h < 0:
+            h = 0
+        self._hue_bar.set_hue(h)
+        self._sv.set_hue(h)
+        self._sv.set_sv(s / 255.0, v / 255.0)
+        self._spins[0].setValue(color.red())
+        self._spins[1].setValue(color.green())
+        self._spins[2].setValue(color.blue())
+        self._updating = False
+
+    def _hue_changed(self, hue):
+        if self._updating:
+            return
+        self._sv.set_hue(int(hue))
+        color = QColor.fromHsv(int(hue), int(self._sv._sat * 255), int(self._sv._val * 255))
+        self._updating = True
+        self._spins[0].setValue(color.red())
+        self._spins[1].setValue(color.green())
+        self._spins[2].setValue(color.blue())
+        self._updating = False
+        self.color_changed.emit(color)
+
+    def _sv_changed(self, sat, val):
+        if self._updating:
+            return
+        color = QColor.fromHsv(int(self._hue_bar._hue), int(sat * 255), int(val * 255))
+        self._updating = True
+        self._spins[0].setValue(color.red())
+        self._spins[1].setValue(color.green())
+        self._spins[2].setValue(color.blue())
+        self._updating = False
+        self.color_changed.emit(color)
+
+    def _rgb_changed(self):
+        if self._updating:
+            return
+        color = QColor(self._spins[0].value(), self._spins[1].value(), self._spins[2].value())
+        self._apply_color(color)
+        self.color_changed.emit(color)
+
+
+class _ClickableColorBox(QLabel):
+    """Color box label that emits right_clicked signal on right mouse button press."""
+    right_clicked = pyqtSignal()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.RightButton:
+            self.right_clicked.emit()
+        else:
+            super().mousePressEvent(event)
+
+
+class _SavedPaletteWidget(QWidget):
+    """A 16-slot saved-color strip beneath the picker.
+
+    Left-click an empty slot  → save current picker color into it.
+    Left-click a filled slot  → load that color back into the picker.
+    Right-click any slot       → arm it; the next picker selection fills it.
+    """
+
+    slot_loaded  = pyqtSignal(QColor)   # emitted when user loads a slot
+    hover_color  = pyqtSignal(object)   # QColor or None when hovering
+
+    SLOTS = 16
+    COLS  = 8
+    SWATCH = 22
+    GAP    = 2
+
+    def __init__(self, get_current_color_fn, parent=None):
+        """
+        get_current_color_fn: callable that returns the currently picked QColor.
+        """
+        super().__init__(parent)
+        self._get_color = get_current_color_fn
+        self._slots = [None] * self.SLOTS   # None = empty
+        self._hover_idx = -1
+        self._armed_idx = -1   # slot waiting to be filled by the picker
+        rows = math.ceil(self.SLOTS / self.COLS)
+        w = self.COLS  * (self.SWATCH + self.GAP) + self.GAP
+        h = rows       * (self.SWATCH + self.GAP) + self.GAP
+        self.setFixedSize(w, h)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setMouseTracking(True)
+        self.setToolTip(
+            'Left-click filled slot: load color\n'
+            'Right-click any slot: arm it, then pick a color in the picker to fill it'
+        )
+
+    def _idx_from_pos(self, x, y):
+        col = (x - self.GAP) // (self.SWATCH + self.GAP)
+        row = (y - self.GAP) // (self.SWATCH + self.GAP)
+        idx = row * self.COLS + col
+        if 0 <= col < self.COLS and 0 <= idx < self.SLOTS:
+            return idx
+        return -1
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, False)
+        p.fillRect(self.rect(), QColor(180, 180, 180))
+        for i in range(self.SLOTS):
+            row = i // self.COLS
+            col = i % self.COLS
+            x = self.GAP + col * (self.SWATCH + self.GAP)
+            y = self.GAP + row * (self.SWATCH + self.GAP)
+            color = self._slots[i]
+            if color is not None:
+                p.fillRect(x, y, self.SWATCH, self.SWATCH, color)
+                p.setPen(QPen(QColor(60, 60, 60), 1))
+            else:
+                # Empty slot: checkerboard hint
+                p.fillRect(x, y, self.SWATCH, self.SWATCH, QColor(220, 220, 220))
+                p.setPen(QPen(QColor(160, 160, 160), 1))
+                mid = self.SWATCH // 2
+                p.drawLine(x + mid, y + 2, x + mid, y + self.SWATCH - 3)
+                p.drawLine(x + 2, y + mid, x + self.SWATCH - 3, y + mid)
+                p.setPen(QPen(QColor(160, 160, 160), 1))
+            # Highlight armed slot (orange border)
+            if i == self._armed_idx:
+                p.setPen(QPen(QColor(255, 140, 0), 2))
+                p.drawRect(x + 1, y + 1, self.SWATCH - 3, self.SWATCH - 3)
+            # Highlight hovered slot (white border)
+            elif i == self._hover_idx:
+                p.setPen(QPen(QColor(255, 255, 255), 2))
+                p.drawRect(x + 1, y + 1, self.SWATCH - 3, self.SWATCH - 3)
+            p.setPen(QPen(QColor(60, 60, 60), 1))
+            p.drawRect(x, y, self.SWATCH - 1, self.SWATCH - 1)
+
+    def mouseMoveEvent(self, event):
+        idx = self._idx_from_pos(event.x(), event.y())
+        if idx != self._hover_idx:
+            self._hover_idx = idx
+            self.update()
+        color = self._slots[idx] if 0 <= idx < self.SLOTS else None
+        self.hover_color.emit(color)
+
+    def leaveEvent(self, event):
+        self._hover_idx = -1
+        self.update()
+        self.hover_color.emit(None)
+
+    def fill_armed_slot(self, color):
+        """Fill the armed slot with the given color, then disarm."""
+        if self._armed_idx < 0:
+            return
+        self._slots[self._armed_idx] = QColor(color)
+        self._armed_idx = -1
+        self.update()
+
+    def mousePressEvent(self, event):
+        idx = self._idx_from_pos(event.x(), event.y())
+        if idx < 0:
+            return
+        if event.button() == Qt.LeftButton:
+            if self._slots[idx] is not None:
+                # Load saved color into picker
+                self.slot_loaded.emit(QColor(self._slots[idx]))
+                self.update()
+        elif event.button() == Qt.RightButton:
+            # Arm this slot to receive the next picker color
+            self._armed_idx = idx
+            self.update()
+
+
 class SidePanel(QFrame):
     """Side panel widget"""
     
@@ -2673,90 +3035,111 @@ class SidePanel(QFrame):
         self.canvas.update()  # Refresh display
     
     def create_color_palette(self, layout):
-        """Create color palette with predefined colors"""
-        from PyQt5.QtWidgets import QHBoxLayout, QGridLayout
-        
-        # Selected color display box
-        selected_color_label = QLabel('Selected Color:')
-        layout.addWidget(selected_color_label)
-        
-        self.selected_color_display = QPushButton()
-        self.selected_color_display.setFixedSize(60, 30)
-        self.selected_color_display.setStyleSheet(f"background-color: rgb(0, 0, 0); border: 2px solid black;")
-        self.selected_color_display.setEnabled(False)  # Make it non-clickable
-        layout.addWidget(self.selected_color_display)
-        
-        # Color palette buttons
-        palette_label = QLabel('Colors:')
-        layout.addWidget(palette_label)
-        
-        # Define the color palette
-        colors = [
-            (255, 0, 0),    # Red
-            (0, 255, 0),    # Green
-            (0, 0, 255),    # Blue
-            (0, 0, 0),      # Black
-            (255, 255, 255), # White
-            (255, 255, 0),  # Yellow
-            (255, 0, 255),  # Magenta
-            (0, 255, 255),  # Cyan
-            (125, 125, 125), # Gray
-            (255, 125, 125)  # Light Pink
-        ]
-        
-        # Create a horizontal layout for color buttons
-        color_layout = QHBoxLayout()
-        
-        self.color_buttons = []
-        for i, (r, g, b) in enumerate(colors):
-            color_button = QPushButton()
-            color_button.setFixedSize(40, 30)
-            color_button.setStyleSheet(f"background-color: rgb({r}, {g}, {b}); border: 2px solid gray;")
-            color_button.clicked.connect(lambda checked, color=(r, g, b): self.select_color(color))
-            
-            # Add border to indicate default selection (black)
-            if (r, g, b) == (0, 0, 0):
-                color_button.setStyleSheet(f"background-color: rgb({r}, {g}, {b}); border: 3px solid yellow;")
-            
-            self.color_buttons.append(color_button)
-            color_layout.addWidget(color_button)
-        
-        # Create a widget to hold the horizontal layout
-        color_widget = QWidget()
-        color_widget.setLayout(color_layout)
-        layout.addWidget(color_widget)
-    
-    def select_color(self, color):
-        """Handle color selection from palette"""
-        r, g, b = color
-        self.selected_color = QColor(r, g, b)
-        
-        # Update selected color display
-        self.selected_color_display.setStyleSheet(f"background-color: rgb({r}, {g}, {b}); border: 2px solid black;")
-        
-        # Update button borders to show selection
-        colors = [
-            (255, 0, 0),    # Red
-            (0, 255, 0),    # Green
-            (0, 0, 255),    # Blue
-            (0, 0, 0),      # Black
-            (255, 255, 255), # White
-            (255, 255, 0),  # Yellow
-            (255, 0, 255),  # Magenta
-            (0, 255, 255),  # Cyan
-            (125, 125, 125), # Gray
-            (255, 125, 125)  # Light Pink
-        ]
-        
-        for i, button in enumerate(self.color_buttons):
-            btn_r, btn_g, btn_b = colors[i]
-            
-            if (btn_r, btn_g, btn_b) == (r, g, b):
-                # Selected button gets yellow border
-                button.setStyleSheet(f"background-color: rgb({btn_r}, {btn_g}, {btn_b}); border: 3px solid yellow;")
-            else:
-                # Other buttons get gray border
-                button.setStyleSheet(f"background-color: rgb({btn_r}, {btn_g}, {btn_b}); border: 2px solid gray;")
+        """Create HSV color picker widget + hover preview + 16-slot saved palette below."""
+        from PyQt5.QtWidgets import QHBoxLayout
+
+        self.color_picker = ColorPickerWidget()
+        self.color_picker.color_changed.connect(self._on_picker_color_changed)
+        layout.addWidget(self.color_picker)
+
+        # Color boxes row: chosen color + hover preview
+        boxes_row = QHBoxLayout()
+        boxes_row.setSpacing(6)
+
+        # Chosen color box (default white, updated on picker click)
+        boxes_row.addWidget(QLabel('Color:'))
+        self._chosen_color_box = _ClickableColorBox()
+        self._chosen_color_box.setFixedSize(36, 22)
+        self._chosen_color_box.setStyleSheet('background-color: rgb(255,255,255); border: 2px solid #555;')
+        self._chosen_color_box.setToolTip('Active color — right-click to pick color from canvas')
+        self._chosen_color_box.right_clicked.connect(self._start_eyedropper)
+        boxes_row.addWidget(self._chosen_color_box)
+
+        # Eyedropper button (explicit, always visible)
+        self._eyedropper_btn = QPushButton('⊕')
+        self._eyedropper_btn.setFixedSize(22, 22)
+        self._eyedropper_btn.setToolTip('Pick color from canvas (then right-click a polygon)')
+        self._eyedropper_btn.setCheckable(True)
+        self._eyedropper_btn.clicked.connect(self._on_eyedropper_btn_clicked)
+        boxes_row.addWidget(self._eyedropper_btn)
+
+        boxes_row.addSpacing(4)
+
+        # Hover preview box
+        boxes_row.addWidget(QLabel('Hover:'))
+        self._hover_preview = QLabel()
+        self._hover_preview.setFixedSize(36, 22)
+        self._hover_preview.setStyleSheet('background-color: transparent; border: 1px solid #888;')
+        boxes_row.addWidget(self._hover_preview)
+        boxes_row.addStretch()
+        layout.addLayout(boxes_row)
+
+        # Saved-color palette strip
+        self._saved_palette = _SavedPaletteWidget(self.color_picker.get_color)
+        self._saved_palette.slot_loaded.connect(self._load_saved_color)
+        self._saved_palette.hover_color.connect(self._on_palette_hover)
+        self.color_picker._hue_bar.hover_color.connect(self._on_palette_hover)
+        self.color_picker._sv.hover_color.connect(self._on_palette_hover)
+        self.color_picker.color_changed.connect(self._saved_palette.fill_armed_slot)
+        layout.addWidget(self._saved_palette)
+
+    def _start_eyedropper(self):
+        """Activate eyedropper mode on the canvas."""
+        if self.canvas:
+            self.canvas.eyedropper_mode = True
+            self.canvas.setCursor(Qt.CrossCursor)
+        self._eyedropper_btn.setChecked(True)
+        self._eyedropper_btn.setStyleSheet('background-color: #f90; border: 2px solid #c60;')
+
+    def _on_eyedropper_btn_clicked(self, checked):
+        """Toggle eyedropper mode via the button."""
+        if checked:
+            self._start_eyedropper()
+        else:
+            if self.canvas:
+                self.canvas.eyedropper_mode = False
+                self.canvas.setCursor(Qt.ArrowCursor)
+            self._eyedropper_btn.setStyleSheet('')
+
+    def receive_eyedropper_color(self, color):
+        """Called by Canvas after eyedropper samples a polygon color."""
+        self.color_picker._apply_color(color)
+        self.selected_color = color
+        r, g, b = color.red(), color.green(), color.blue()
+        self._chosen_color_box.setStyleSheet(
+            f'background-color: rgb({r},{g},{b}); border: 2px solid #555;'
+        )
+        # If a palette slot is armed, fill it with the sampled color
+        self._saved_palette.fill_armed_slot(color)
+        self._eyedropper_btn.setChecked(False)
+        self._eyedropper_btn.setStyleSheet('')
+
+    def _on_palette_hover(self, color):
+        """Update the hover preview box."""
+        if color is None:
+            self._hover_preview.setStyleSheet('background-color: transparent; border: 1px solid #888;')
+        else:
+            r, g, b = color.red(), color.green(), color.blue()
+            self._hover_preview.setStyleSheet(
+                f'background-color: rgb({r},{g},{b}); border: 1px solid #888;'
+            )
+
+    def _load_saved_color(self, color):
+        """Load a saved slot color into the picker and update selected_color."""
+        self.color_picker._apply_color(color)
+        self.selected_color = color
+        r, g, b = color.red(), color.green(), color.blue()
+        self._chosen_color_box.setStyleSheet(
+            f'background-color: rgb({r},{g},{b}); border: 2px solid #555;'
+        )
+
+    def _on_picker_color_changed(self, color):
+        """Update selected_color and chosen color box when the picker changes."""
+        self.selected_color = color
+        r, g, b = color.red(), color.green(), color.blue()
+        self._chosen_color_box.setStyleSheet(
+            f'background-color: rgb({r},{g},{b}); border: 2px solid #555;'
+        )
     
     def duplicate_all_polygons(self):
         """Create 8 copies of all existing polygons using duplicate offsets"""
