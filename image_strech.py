@@ -4,7 +4,7 @@ import numpy as np
 import copy
 import pickle
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QGridLayout, QPushButton, QLabel, QFileDialog, QMessageBox, QScrollArea, QSpinBox,
+                             QHBoxLayout, QGridLayout, QPushButton, QLabel, QFileDialog, QMessageBox, QScrollArea, QSpinBox, QDoubleSpinBox,
                              QSlider, QGroupBox, QFormLayout, QColorDialog)
 from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont
 from PyQt5.QtCore import Qt, QPoint, QPointF, QEvent, pyqtSignal, QRectF
@@ -921,7 +921,36 @@ class MainWindow(QMainWindow):
         size_layout.addWidget(QLabel("x"))
         size_layout.addWidget(self.height_spin)
         sidebar_layout.addLayout(size_layout)
-        
+
+        sidebar_layout.addSpacing(10)
+        sidebar_layout.addWidget(QLabel("Scale Image (%):" ))
+
+        self.img_width_scale_spin = QDoubleSpinBox()
+        self.img_width_scale_spin.setRange(0.1, 10000.0)
+        self.img_width_scale_spin.setDecimals(1)
+        self.img_width_scale_spin.setSingleStep(0.1)
+        self.img_width_scale_spin.setValue(100.0)
+        self.img_width_scale_spin.setSuffix(" % W")
+        self.img_width_scale_spin.setToolTip("Scale image width by this percentage")
+
+        self.img_height_scale_spin = QDoubleSpinBox()
+        self.img_height_scale_spin.setRange(0.1, 10000.0)
+        self.img_height_scale_spin.setDecimals(1)
+        self.img_height_scale_spin.setSingleStep(0.1)
+        self.img_height_scale_spin.setValue(100.0)
+        self.img_height_scale_spin.setSuffix(" % H")
+        self.img_height_scale_spin.setToolTip("Scale image height by this percentage")
+
+        img_scale_layout = QHBoxLayout()
+        img_scale_layout.addWidget(self.img_width_scale_spin)
+        img_scale_layout.addWidget(self.img_height_scale_spin)
+        sidebar_layout.addLayout(img_scale_layout)
+
+        apply_img_scale_btn = QPushButton("Apply Image Scale")
+        apply_img_scale_btn.setToolTip("Resize the image by the given width/height percentages")
+        apply_img_scale_btn.clicked.connect(self.apply_image_scale)
+        sidebar_layout.addWidget(apply_img_scale_btn)
+
         sidebar_layout.addSpacing(20)
         
         # Image Tilt Control (applies to entire image)
@@ -1028,9 +1057,11 @@ class MainWindow(QMainWindow):
         right_sidebar_layout.addSpacing(10)
         right_sidebar_layout.addWidget(QLabel("Grid Size:"))
         
-        self.grid_size_spin = QSpinBox()
-        self.grid_size_spin.setRange(1, 100)
-        self.grid_size_spin.setValue(10)
+        self.grid_size_spin = QDoubleSpinBox()
+        self.grid_size_spin.setRange(0.1, 100.0)
+        self.grid_size_spin.setDecimals(1)
+        self.grid_size_spin.setSingleStep(0.1)
+        self.grid_size_spin.setValue(10.0)
         self.grid_size_spin.setSuffix(" %")
         self.grid_size_spin.setToolTip("Grid cell size as percentage of image size")
         self.grid_size_spin.valueChanged.connect(self.update_grid_size)
@@ -1059,9 +1090,11 @@ class MainWindow(QMainWindow):
         right_sidebar_layout.addSpacing(6)
         right_sidebar_layout.addWidget(QLabel("Scale Polygon Array:"))
         scale_poly_layout = QHBoxLayout()
-        self.poly_scale_spin = QSpinBox()
-        self.poly_scale_spin.setRange(1, 10000)
-        self.poly_scale_spin.setValue(100)
+        self.poly_scale_spin = QDoubleSpinBox()
+        self.poly_scale_spin.setRange(0.1, 10000.0)
+        self.poly_scale_spin.setDecimals(1)
+        self.poly_scale_spin.setSingleStep(0.1)
+        self.poly_scale_spin.setValue(100.0)
         self.poly_scale_spin.setSuffix(" %")
         self.poly_scale_spin.setToolTip("Scale all polygon coordinates by this percentage")
         scale_poly_layout.addWidget(self.poly_scale_spin)
@@ -1504,6 +1537,25 @@ class MainWindow(QMainWindow):
 
     def update_resolution(self):
         self.canvas.set_target_resolution(self.width_spin.value(), self.height_spin.value())
+
+    def apply_image_scale(self):
+        if self.canvas.cv_image is None:
+            return
+        h, w = self.canvas.cv_image.shape[:2]
+        new_w = max(1, int(round(w * self.img_width_scale_spin.value() / 100.0)))
+        new_h = max(1, int(round(h * self.img_height_scale_spin.value() / 100.0)))
+        self.canvas.cv_image = cv2.resize(self.canvas.cv_image, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
+        self.width_spin.blockSignals(True)
+        self.height_spin.blockSignals(True)
+        self.width_spin.setValue(new_w)
+        self.height_spin.setValue(new_h)
+        self.width_spin.blockSignals(False)
+        self.height_spin.blockSignals(False)
+        self.canvas.set_target_resolution(new_w, new_h)
+        self.img_width_scale_spin.setValue(100.0)
+        self.img_height_scale_spin.setValue(100.0)
+        self.canvas.apply_effects()
+        self.canvas.update()
 
     def load_image(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open Image", "", "Images (*.png *.jpg *.jpeg *.bmp)")
